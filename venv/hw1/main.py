@@ -11,14 +11,26 @@ def all_occurrences(pos, corpus):
     return list(dict.fromkeys(occurrences))
 
 
+def adverbs_of_degree():
+    seeds = ["extremely", "quite", "just", "almost", "very", "too", "enough", "slightly", "completely"]
+    generated = list(map(lambda s: wordnet.synsets(s, pos=wordnet.ADV), seeds))
+    generated = [item.lemma_names()[0] for sublist in generated for item in sublist]
+    generated = set(generated)
+    generated = set(filter(lambda g: g in raw_corpus, generated))
+    print(generated)
+    return generated
+
+
 stemmer = SnowballStemmer("english")
-corpus_text = brown.tagged_words(categories='news')
-print("corpus length", len(corpus_text))
+tagged_corpus = brown.tagged_words(categories="news")
+raw_corpus = brown.words()
+print("corpus length", len(tagged_corpus))
 verbs = ['VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ']
 adjectives = ['JJ', 'JJR', 'JJS']
 adverbs = ['RB', "RBR", "RBS"]
-all_verbs = all_occurrences(verbs, corpus_text)
-all_adjectives = all_occurrences(adjectives, corpus_text)
+all_adverbs = adverbs_of_degree()
+all_verbs = all_occurrences(verbs, tagged_corpus)
+all_adjectives = all_occurrences(adjectives, tagged_corpus)
 all_verb_synsets = dict(map(lambda s: (s, wordnet.synsets(s, pos=wordnet.VERB)), all_verbs))
 all_adjective_synsets = dict(map(lambda s: (s, wordnet.synsets(s, pos=wordnet.ADJ)), all_adjectives))
 adverb_verb = []
@@ -81,12 +93,12 @@ def safe_similarity(f, s):
             return sim1
 
 
-for first, second in pairwise(corpus_text):
-    if (first[1] in adverbs and second[1] in verbs) \
-            or (second[1] in adverbs and first[1] in verbs):
+for first, second in pairwise(tagged_corpus):
+    if (first[1] in adverbs and first[0] in all_adverbs and second[1] in verbs) \
+            or (second[1] in adverbs and second[0] in all_adverbs and first[1] in verbs):
         adverb_verb.append((first, second))
-    if (first[1] in adverbs and second[1] in adjectives) \
-            or (second[1] in adverbs and first[1] in adjectives):
+    if (first[1] in adverbs and first[0] in all_adverbs and second[1] in adjectives) \
+            or (second[1] in adverbs and second[0] in all_adverbs and first[1] in adjectives):
         adverb_adjective.append((first, second))
 
 # remove duplicates
@@ -95,18 +107,14 @@ adverb_adjective = list(dict.fromkeys(adverb_adjective))
 
 print(len(all_verbs), len(all_adjectives), len(adverb_verb), len(adverb_adjective))
 
-for first, second in adverb_verb:
+for first, second in adverb_verb + adverb_adjective:
     if first[1] in adverbs:
         if second[1] in verbs:
             print("VERB: ", first[0], second[0], maximum_similarity(second[0], all_verb_synsets, wordnet.VERB))
         else:
             print("ADJ: ", first[0], second[0], maximum_similarity(second[0], all_adjective_synsets, wordnet.ADJ))
-        # print(first[0], second[0], wordnet.synsets(second[0]))
     else:
-        # print(first[0], second[0], wordnet.synsets(first[0]))
-        pass
-
-# find verb/adjective with most similar synsets
-# how to measure similarity??
-# percentage of overlapping synsets??
-# average distance between all pairs of synsets of the two words?
+        if first[1] in verbs:
+            print("VERB: ", first[0], second[0], maximum_similarity(first[0], all_verb_synsets, wordnet.VERB))
+        else:
+            print("ADJ: ", first[0], second[0], maximum_similarity(first[0], all_adjective_synsets, wordnet.ADJ))
