@@ -16,6 +16,7 @@ def adverbs_of_degree():
     generated = list(map(lambda s: wordnet.synsets(s, pos=wordnet.ADV), seeds))
     generated = [item.lemma_names()[0] for sublist in generated for item in sublist]
     generated = set(generated)
+    generated = generated | set(seeds)
     generated = set(filter(lambda g: g in raw_corpus, generated))
     print(generated)
     return generated
@@ -107,14 +108,25 @@ adverb_adjective = list(dict.fromkeys(adverb_adjective))
 
 print(len(all_verbs), len(all_adjectives), len(adverb_verb), len(adverb_adjective))
 
+output = []
+
 for first, second in adverb_verb + adverb_adjective:
     if first[1] in adverbs:
         if second[1] in verbs:
-            print("VERB: ", first[0], second[0], maximum_similarity(second[0], all_verb_synsets, wordnet.VERB))
+            output.append(('VERB', first[0], second[0], maximum_similarity(second[0], all_verb_synsets, wordnet.VERB)))
         else:
-            print("ADJ: ", first[0], second[0], maximum_similarity(second[0], all_adjective_synsets, wordnet.ADJ))
+            output.append(('ADJ', first[0], second[0], maximum_similarity(second[0], all_adjective_synsets, wordnet.ADJ)))
     else:
         if first[1] in verbs:
-            print("VERB: ", first[0], second[0], maximum_similarity(first[0], all_verb_synsets, wordnet.VERB))
+            output.append(('VERB', first[0], second[0], maximum_similarity(first[0], all_verb_synsets, wordnet.VERB)))
         else:
-            print("ADJ: ", first[0], second[0], maximum_similarity(first[0], all_adjective_synsets, wordnet.ADJ))
+            output.append(('ADJ', first[0], second[0], maximum_similarity(first[0], all_adjective_synsets, wordnet.ADJ)))
+
+output_text = []
+for out in output:
+    for top in out[3][:3]:
+        output_text.append(out[1] + ' ' + out[2] + ', ' + top[0] + '\n')
+
+f = open('CS372_HW1_output_20150860.csv', 'w')
+for t in output_text[:50]:
+    f.write(t)
