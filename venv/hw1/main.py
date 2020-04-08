@@ -12,6 +12,14 @@ def all_occurrences(pos, corpus):
     return list(dict.fromkeys(occurrences))
 
 
+def word_counts(pos, corpus):
+    result = {}
+    occurrences = list(filter(lambda a: a[1] in pos, corpus))
+    for i in occurrences:
+        result[i[0].lower()] = result.get(i[0].lower(), 0) + 1
+    return result
+
+
 # generate intensity modifying adverbs from seed adverbs by combining adverb synonyms of each
 def adverbs_of_degree():
     seeds = ["extremely", "quite", "just", "almost", "very", "too", "enough", "slightly", "completely"]
@@ -31,8 +39,8 @@ def adverbs_of_degree():
 
 stemmer = SnowballStemmer("english")
 # corpus of a specific category with pos tags
-tagged_corpus = brown.tagged_words(categories="news")
-raw_corpus = brown.words()
+tagged_corpus = brown.tagged_words(categories=["news", "editorial"])
+raw_corpus = brown.words(categories=["news", "editorial"])
 print("corpus length", len(tagged_corpus))
 # pos tags for each pos
 verbs = ['VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ']
@@ -43,9 +51,14 @@ all_adverbs = adverbs_of_degree()
 # finding occurrences of verbs and adjectives
 all_verbs = all_occurrences(verbs, tagged_corpus)
 all_adjectives = all_occurrences(adjectives, tagged_corpus)
+
+# counts of all verbs and adjectives
+verb_counts = word_counts(verbs, tagged_corpus)
+adjective_counts = word_counts(adjectives, tagged_corpus)
+
 # dictionary of synsets of each verb and adjective
-all_verb_synsets = dict(map(lambda s: (s, wordnet.synsets(s, pos=wordnet.VERB)), all_verbs))
-all_adjective_synsets = dict(map(lambda s: (s, wordnet.synsets(s, pos=wordnet.ADJ)), all_adjectives))
+all_verb_synsets = dict(map(lambda s: (s.lower(), wordnet.synsets(s, pos=wordnet.VERB)), all_verbs))
+all_adjective_synsets = dict(map(lambda s: (s.lower(), wordnet.synsets(s, pos=wordnet.ADJ)), all_adjectives))
 # empty lists of adverb-verb and adverb-adjective pairs
 adverb_verb = []
 adverb_adjective = []
@@ -62,19 +75,31 @@ def pairwise(iterable):
 def maximum_similarity(word, target_synsets, pos):
     # synset of given word
     word_synset = wordnet.synsets(word, pos=pos)
+    word = word.lower()
+    if pos == wordnet.VERB:
+        word_count = verb_counts[word]
+    else:
+        word_count = adjective_counts[word]
     # stem of given word
     word_stem = stemmer.stem(word)
     similarities = []
     # for each key of given synsets
     for target in target_synsets:
+        target = target.lower()
         # stem of target word
         target_stem = stemmer.stem(target)
         # if given word and target word have different stems (i.e. not different tenses of the same verb etc.)
         if word_stem != target_stem:
-            # calculate similarity between synsets of two words
-            sim = synset_similarity(word_synset, target_synsets[target])
-            # record the similarity score
-            similarities.append((target, sim, stemmer.stem(target)))
+            if pos == wordnet.VERB:
+                target_count = verb_counts[target]
+            else:
+                target_count = adjective_counts[target]
+            # compare frequency of word and target
+            if word_count > target_count:
+                # calculate similarity between synsets of two words
+                sim = synset_similarity(word_synset, target_synsets[target])
+                # record the similarity score
+                similarities.append((target, sim, stemmer.stem(target)))
 
     # sort the similarity by the score in descending order and get top 50
     similarities = sorted(similarities, key=lambda x: x[1], reverse=True)[:50]
@@ -136,12 +161,12 @@ def safe_similarity(f, s):
 
 # for each pairs of words
 for first, second in pairwise(tagged_corpus):
-    if (first[1] in adverbs and first[0] in all_adverbs and second[1] in verbs) \
-            or (second[1] in adverbs and second[0] in all_adverbs and first[1] in verbs):
+    if (first[1] in adverbs and first[0].lower() in all_adverbs and second[1] in verbs) \
+            or (second[1] in adverbs and second[0].lower() in all_adverbs and first[1] in verbs):
         # if it is an intensity modifying adverb and a verb pair, record it
         adverb_verb.append((first, second))
-    if (first[1] in adverbs and first[0] in all_adverbs and second[1] in adjectives) \
-            or (second[1] in adverbs and second[0] in all_adverbs and first[1] in adjectives):
+    elif (first[1] in adverbs and first[0].lower() in all_adverbs and second[1] in adjectives) \
+            or (second[1] in adverbs and second[0].lower() in all_adverbs and first[1] in adjectives):
         # if it is an intensity modifying adverb and an adjective pair, record it
         adverb_adjective.append((first, second))
 
@@ -173,7 +198,7 @@ for first, second in adverb_verb + adverb_adjective:
 # form result pairs into text
 output_text = []
 for out in output:
-    for top in out[3][:3]:
+    for top in out[3][:2]:
         output_text.append(out[1] + ' ' + out[2] + ', ' + top[0] + '\n')
 
 # save top 50 results to csv file
