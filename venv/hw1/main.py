@@ -12,6 +12,7 @@ def all_occurrences(pos, corpus):
     return list(dict.fromkeys(occurrences))
 
 
+# create a frequency map of word of give pos
 def word_counts(pos, corpus):
     result = {}
     occurrences = list(filter(lambda a: a[1] in pos, corpus))
