@@ -16,6 +16,8 @@ exclusions = ['\.', '\,', "''", ':', '--', 'TO', 'CC', 'IN', 'AT', 'CS', '``', '
 exclusions = "(" + ")|(".join(exclusions) + ")"
 
 for first, second in bigram:
+    first = (first[0].lower(), first[1])
+    second = (second[0].lower(), second[1])
     if (first[1] in adjectives or first[1] in adverbs) and not re.match(exclusions, second[1]):
         pairs[first][second] += 1
 
