@@ -5,6 +5,7 @@ from operator import itemgetter
 from functools import reduce
 from statistics import stdev, StatisticsError
 import re
+from tabulate import tabulate
 
 tagged_corpus = brown.tagged_words()
 print("corpus length", len(tagged_corpus))
@@ -27,18 +28,21 @@ for pair in pairs.items():
     counts = list(map(lambda p: p[1], words))
     # if counts.count(counts[0]) == len(counts):
     #     continue
-    try:
-        fixed_data.append((pair[0], stdev(counts) + words[0][1], words))
-    except StatisticsError:
-        fixed_data.append((pair[0], words[0][1], words))
+    for w in words:
+        try:
+            fixed_data.append((pair[0], stdev(counts) + w[1], w[0], w[1]))
+        except StatisticsError:
+            fixed_data.append((pair[0], w[1], w[0], w[1]))
 
 fixed_data = sorted(fixed_data, key=itemgetter(1), reverse=True)
 
-for k, s, v in fixed_data:
-    if s > 0:
-        print("{} -> {}, {}".format(k, s, v))
+print(tabulate(fixed_data[:100]))
+# for k, s, v in fixed_data[:100]:
+#     if s > 0:
+#         print("{}\t -> {},\t {}".format(k, s, v))
+
 print("result count: {}".format(len(fixed_data)))
 
 f = open('CS372_HW2_output_20150860.csv', 'w')
 for t in fixed_data[:100]:
-    f.write("{} {}\n".format(t[0][0], t[2][0][0][0]))
+    f.write("{} {}\n".format(t[0][0], t[2][0]))
