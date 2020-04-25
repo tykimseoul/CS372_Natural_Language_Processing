@@ -38,3 +38,7 @@ for k, s, v in fixed_data:
     if s > 0:
         print("{} -> {}, {}".format(k, s, v))
 print("result count: {}".format(len(fixed_data)))
+
+f = open('CS372_HW2_output_20150860.csv', 'w')
+for t in fixed_data[:100]:
+    f.write("{} {}\n".format(t[0][0], t[2][0][0][0]))
