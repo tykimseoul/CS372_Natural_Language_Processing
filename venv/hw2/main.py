@@ -5,7 +5,6 @@ from operator import itemgetter
 from functools import reduce
 from statistics import stdev, StatisticsError
 import re
-from tabulate import tabulate
 
 # tagged corpus
 tagged_corpus = brown.tagged_words()
@@ -37,8 +36,6 @@ for pair in pairs.items():
     words = sorted([(word, count) for word, count in pair[1].items()], key=itemgetter(1), reverse=True)
     # extract frequencies
     counts = list(map(lambda p: p[1], words))
-    # if counts.count(counts[0]) == len(counts):
-    #     continue
     for w in words:
         # save scores of each bigram
         try:
@@ -50,10 +47,8 @@ for pair in pairs.items():
 # sort in terms of score
 fixed_data = sorted(fixed_data, key=itemgetter(1), reverse=True)
 
-print(tabulate(fixed_data[:100]))
-# for k, s, v in fixed_data[:100]:
-#     if s > 0:
-#         print("{}\t -> {},\t {}".format(k, s, v))
+for k, s, v, p in fixed_data[:100]:
+    print("{}\t -> {:.3f},\t {}, {}".format(k, s, v, p))
 
 print("result count: {}".format(len(fixed_data)))
 
