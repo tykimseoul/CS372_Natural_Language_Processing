@@ -41,7 +41,7 @@ def concatenate_y(prons):
 def normalize_stress(prons):
     new_prons = set()
     for pron in prons:
-        stress = extract_stress(pron)
+        stress = stress_pattern(pron)
         mn = min(list(filter(lambda n: n is not None, stress)))
         stress = list(map(lambda s: s - mn if s is not None else None, stress))
         new_pron = tuple(map(lambda p: p[1][:-1] + str(stress[p[0]]) if stress[p[0]] is not None else p[1], enumerate(pron)))
@@ -49,23 +49,16 @@ def normalize_stress(prons):
     return new_prons
 
 
-def extract_stress(pron):
+def stress_pattern(pron):
     return list(map(lambda p: int(p[-1]) if p[-1].isdigit() else None, pron))
 
 
-def combine_stress(pron1, pron2):
-    if extract_stress(pron1) != extract_stress(pron2):
-        return {pron1, pron2}
-    else:
-        return {pron1}
-
-
-def extract_consonants(pron):
+def consonant_pattern(pron):
     return list(map(lambda p: p if not any(x in 'AEIOUY' for x in p) else None, pron))
 
 
-def combine_consonants(pron1, pron2):
-    if extract_consonants(pron1) != extract_consonants(pron2):
+def combine_by_condition(pron1, pron2, condition):
+    if condition(pron1) != condition(pron2):
         return {pron1, pron2}
     else:
         return {pron1}
@@ -74,8 +67,8 @@ def combine_consonants(pron1, pron2):
 def filter_close_pronunciations(prons):
     new_prons = set()
     for pair in combinations(prons, 2):
-        new_prons.update(combine_stress(pair[0], pair[1]))
-        new_prons.update(combine_consonants(pair[0], pair[1]))
+        new_prons.update(combine_by_condition(pair[0], pair[1], stress_pattern))
+        new_prons.update(combine_by_condition(pair[0], pair[1], consonant_pattern))
     return new_prons
 
 
