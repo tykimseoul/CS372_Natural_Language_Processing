@@ -50,25 +50,26 @@ def normalize_stress(prons):
 
 
 def stress_pattern(pron):
-    return list(map(lambda p: int(p[-1]) if p[-1].isdigit() else None, pron))
+    return tuple(map(lambda p: int(p[-1]) if p[-1].isdigit() else None, pron))
 
 
 def consonant_pattern(pron):
-    return list(map(lambda p: p if not any(x in 'AEIOUY' for x in p) else None, pron))
+    return tuple(map(lambda p: p if not any(x in 'AEIOUY' for x in p) else None, pron))
 
 
-def combine_by_condition(pron1, pron2, condition):
-    if condition(pron1) != condition(pron2):
-        return {pron1, pron2}
-    else:
-        return {pron1}
+def combine_by_condition(prons, condition):
+    hashmap = dict(map(lambda p: (p, condition(p)), prons))
+    unique_values = list(dict.fromkeys(hashmap.values()))
+    indices = list(map(lambda v: list(hashmap.values()).index(v), unique_values))
+    unique_keys = list(map(lambda v: list(hashmap.keys())[v], indices))
+    return unique_keys
 
 
 def filter_close_pronunciations(prons):
+    prons = list(prons)
     new_prons = set()
-    for pair in combinations(prons, 2):
-        new_prons.update(combine_by_condition(pair[0], pair[1], stress_pattern))
-        new_prons.update(combine_by_condition(pair[0], pair[1], consonant_pattern))
+    new_prons.update(combine_by_condition(prons, stress_pattern))
+    new_prons.update(combine_by_condition(prons, consonant_pattern))
     return new_prons
 
 
@@ -98,8 +99,24 @@ def safe_meanings(w):
     return list(filter(lambda s: w in s.lemma_names(), wordnet.synsets(w)))
 
 
-# different stress pattern or different consonant, different vowel is considered similar
+# different stress pattern or different consonant are different pronunciations, (different vowel but same consonant and same stress) is considered similar
+'''
+    considered different pronunciations:
+        1. different stress pattern
+        OR
+        2. different consonants
+'''
+'''
+    goal words:
+        1. research
+        2. juvenile
+        3. replace
+'''
 # concatenate y pron with the next because that does not infer heteronym; heteronyms are not distinguished by addition of y
+# look at the larger result and combine exceptions such as center, government, county etc
+# pronunciations such as N+T->N, H+W->W; this is more of an accent difference than a pronunciation
+# only one pronunciation should have it, N+T is followed by a vowel
+# check consonant after changing and combine if same
 
 heteronym_sents = list(map(lambda s: [s, get_heteronyms(s)], tagged_sents))
 heteronym_sents = list(filter(lambda s: len(s[1]) > 0, heteronym_sents))
