@@ -3,8 +3,30 @@ from nltk.corpus import brown, cmudict, wordnet
 from collections import defaultdict
 from tabulate import tabulate
 from itertools import combinations
+from bs4 import BeautifulSoup
+import requests
+import re
 
-tagged_sents = brown.tagged_sents()[:1000]
+sample_sents = [
+    'I wound a bandage around my wound',
+    'When he wrecked his moped he moped all day',
+    'The chair was so close to the door we couldn’t close it',
+    'Don’t just give the gift; present the present',
+    'The Polish man decided to polish his table',
+    'She shed a tear because she had a tear in her shirt',
+    'Farmers reap what they sow to feed it to the sow',
+    'How much produce does the farm produce',
+    'More people desert in the desert than in the mountains',
+    'The researcher wanted to subject the subject to a psychology test'
+]
+
+tagged_sents = list(map(lambda s: (list(map(lambda w: (w, ''), s.split(' ')))), sample_sents))
+# tagged_sents = brown.tagged_sents()[:100]
+dictionary_url = 'https://www.dictionary.com/browse/'
+pos_exclusions = ['\.', '\,', "''", ':', '--', '``', '\)', '\(']
+pos_exclusions = "(" + ")|(".join(pos_exclusions) + ")"
+word_exclusions = ['\w[0-9]+\w', '\w+-\w+']
+word_exclusions = "(" + ")|(".join(word_exclusions) + ")"
 
 pron_dict = cmudict.dict()
 
@@ -79,13 +101,12 @@ def filter_single_meaning(words):
 
 
 def get_heteronyms(sent):
-    spellings = count_same_spelling(sent)
-    prons = filter_single_pronunciation(spellings)
-    meanings = filter_single_meaning(prons)
-    if len(meanings) > 0:
-        print(' '.join(list(map(lambda w: w[0], sent))))
-        print(meanings)
-    return meanings
+    print(sent)
+    sent = list(filter(lambda w: not re.match(word_exclusions, w[0]) and not re.match(pos_exclusions, w[1]), sent))
+    heteronyms = list(map(lambda w: (w, crawl_pronunciation(w[0])), sent))
+    heteronyms = list(filter(lambda w: w[1] is not None and len(w[1]) > 1, heteronyms))
+    print('<HETERONYMS>', tabulate(heteronyms))
+    return heteronyms
 
 
 def safe_prons(w):
@@ -97,6 +118,45 @@ def safe_prons(w):
 
 def safe_meanings(w):
     return list(filter(lambda s: w in s.lemma_names(), wordnet.synsets(w)))
+
+
+def crawl_pronunciation(word):
+    html = requests.get(dictionary_url + word)
+    soup = BeautifulSoup(html.text, "html.parser")
+    entries = soup.findAll(class_='entry-headword')
+    if len(entries) == 0:
+        print('========= invalid search:', word)
+        return None
+    definition_headers = soup.find_all('h2', attrs={'id': 'luna-section'})
+    valid_definition_count = len(definition_headers) + 1 if definition_headers is not None else 1
+    definitions = soup.findAll(class_='css-1urpfgu e16867sm0')
+    definitions = list(filter(lambda d: d.find(['span', 'h1'], attrs={'class': 'css-1jzk4d9 e1rg2mtf8'}) is not None, definitions))
+    ipas = []
+    examples = []
+    for definition in definitions[:valid_definition_count]:
+        entry_word = definition.find(['span', 'h1'], attrs={'class': 'css-1jzk4d9 e1rg2mtf8'})
+        if entry_word.text == word:
+            ipa = definition.find('span', attrs={'class': 'pron-ipa-content'})
+            ipas.append(ipa)
+            contents = definition.find_all('section', attrs={'class': 'css-pnw38j e1hk9ate0'})
+            example = dict(map(lambda c: extract_examples(c), contents))
+            examples.append(example)
+    assert len(ipas) <= valid_definition_count
+    ipas = list(map(lambda i: i.text if i is not None else None, ipas))
+    prons = zip(ipas, examples)
+    prons = list(filter(lambda i: i[0] is not None and i[1] is not None, prons))
+    print(word, tabulate(prons))
+    return prons
+
+
+def extract_examples(content):
+    pos = content.find('span', attrs={'class': 'luna-pos'})
+    if pos is not None:
+        examples = content.find_all('span', attrs={'class': 'luna-example'})
+        examples = list(map(lambda e: e.text, examples))
+        return pos.text, examples
+    else:
+        return None, None
 
 
 # different stress pattern or different consonant are different pronunciations, (different vowel but same consonant and same stress) is considered similar
@@ -118,7 +178,6 @@ def safe_meanings(w):
 # only one pronunciation should have it, N+T is followed by a vowel
 # check consonant after changing and combine if same
 
-heteronym_sents = list(map(lambda s: [s, get_heteronyms(s)], tagged_sents))
+heteronym_sents = list(map(lambda s: (s, get_heteronyms(s)), tagged_sents))
 heteronym_sents = list(filter(lambda s: len(s[1]) > 0, heteronym_sents))
-print(tabulate(heteronym_sents))
 print(len(heteronym_sents), len(tagged_sents))
