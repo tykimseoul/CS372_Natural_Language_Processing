@@ -8,9 +8,9 @@ import requests
 import re
 
 sample_sents = [
+    'The chair was so close to the door we couldn’t close it',
     'I wound a bandage around my wound',
     'When he wrecked his moped he moped all day',
-    'The chair was so close to the door we couldn’t close it',
     'Don’t just give the gift; present the present',
     'The Polish man decided to polish his table',
     'She shed a tear because she had a tear in her shirt',
@@ -121,6 +121,7 @@ def safe_meanings(w):
 
 
 def crawl_pronunciation(word):
+    word = word.lower()
     html = requests.get(dictionary_url + word)
     soup = BeautifulSoup(html.text, "html.parser")
     entries = soup.findAll(class_='entry-headword')
@@ -130,23 +131,50 @@ def crawl_pronunciation(word):
     definition_headers = soup.find_all('h2', attrs={'id': 'luna-section'})
     valid_definition_count = len(definition_headers) + 1 if definition_headers is not None else 1
     definitions = soup.findAll(class_='css-1urpfgu e16867sm0')
-    definitions = list(filter(lambda d: d.find(['span', 'h1'], attrs={'class': 'css-1jzk4d9 e1rg2mtf8'}) is not None, definitions))
+    definitions = list(filter(lambda d: get_entry_word(d) is not None, definitions))
+    definitions = list(filter(lambda d: get_entry_word(d).text == word, definitions[:valid_definition_count]))
     ipas = []
     examples = []
-    for definition in definitions[:valid_definition_count]:
-        entry_word = definition.find(['span', 'h1'], attrs={'class': 'css-1jzk4d9 e1rg2mtf8'})
-        if entry_word.text == word:
-            ipa = definition.find('span', attrs={'class': 'pron-ipa-content'})
-            ipas.append(ipa)
-            contents = definition.find_all('section', attrs={'class': 'css-pnw38j e1hk9ate0'})
-            example = dict(map(lambda c: extract_examples(c), contents))
-            examples.append(example)
-    assert len(ipas) <= valid_definition_count
-    ipas = list(map(lambda i: i.text if i is not None else None, ipas))
+    for definition in definitions:
+        ipa = definition.find('span', attrs={'class': 'pron-ipa-content'})
+        ipas.append(ipa)
+        contents = definition.find_all('section', attrs={'class': 'css-pnw38j e1hk9ate0'})
+        example = list(map(lambda c: extract_examples(c), contents))
+        examples.append(example)
     prons = zip(ipas, examples)
     prons = list(filter(lambda i: i[0] is not None and i[1] is not None, prons))
-    print(word, tabulate(prons))
-    return prons
+    prons = list(map(lambda i: (simplify_ipa(i[0].text), i[1]), prons))
+    if len(prons) > 1:
+        collapsed = defaultdict(list)
+        for pron in prons:
+            collapsed[pron[0]].extend(pron[1])
+        collapsed = list(map(lambda c: (c[0], c[1]), collapsed.items()))
+        print(word, tabulate(collapsed))
+        return collapsed
+    else:
+        print(word, tabulate(prons))
+        return prons
+
+
+def simplify_ipa(ipa):
+    ipas = ipa.split(';')
+    ipas = list(map(lambda i: i.replace('/', '').strip(), ipas))
+    pos = ['verb', 'adjective', 'noun']
+    if any(list(map(lambda i: any(s in i.lower() for s in pos), ipas))):
+        pos_indices = list(map(lambda i: max(list(map(lambda p: i.lower().rfind(p) + len(p) if i.lower().rfind(p) is not -1 else -1, pos))), ipas))
+        ipa_indices = list(map(lambda i: i[1].find(' ', pos_indices[i[0]] + 1), enumerate(ipas)))
+        new_ipas = list(map(lambda i: i[1][:ipa_indices[i[0]]] if ipa_indices[i[0]] is not -1 else i[1], enumerate(ipas)))
+    else:
+        new_ipas = list(filter(lambda i: not any(s in i.lower() for s in ['stress', 'older', 'before']), ipas))
+        if len(new_ipas) == 0:
+            new_ipas = list(filter(lambda i: re.match('^.*unstressed.*$', i.lower()), ipas))[:1]
+            if len(new_ipas) == 0:
+                new_ipas = list(filter(lambda i: re.match('^.*consonant.*$', i.lower()), ipas))[:1]
+    return tuple(new_ipas)
+
+
+def get_entry_word(definition):
+    return definition.find(['span', 'h1'], attrs={'class': 'css-1jzk4d9 e1rg2mtf8'})
 
 
 def extract_examples(content):
