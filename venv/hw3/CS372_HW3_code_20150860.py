@@ -8,10 +8,10 @@ import requests
 import re
 
 sample_sents = [
-    'The chair was so close to the door we couldn’t close it',
+    'A chair was so close to the door we couldn’t close it',
     'I wound a bandage around my wound',
     'When he wrecked his moped he moped all day',
-    'Don’t just give the gift; present the present',
+    'Don’t just give the gift present the present',
     'The Polish man decided to polish his table',
     'She shed a tear because she had a tear in her shirt',
     'Farmers reap what they sow to feed it to the sow',
@@ -164,13 +164,23 @@ def simplify_ipa(ipa):
         pos_indices = list(map(lambda i: max(list(map(lambda p: i.lower().rfind(p) + len(p) if i.lower().rfind(p) is not -1 else -1, pos))), ipas))
         ipa_indices = list(map(lambda i: i[1].find(' ', pos_indices[i[0]] + 1), enumerate(ipas)))
         new_ipas = list(map(lambda i: i[1][:ipa_indices[i[0]]] if ipa_indices[i[0]] is not -1 else i[1], enumerate(ipas)))
+        prons = defaultdict(list)
+        for i in new_ipas:
+            prons[i.split(' ')[-1]].extend(re.split('[,\s]', i)[:-1])
+        new_prons = []
+        for p in prons.items():
+            for pos in p[1]:
+                if len(pos) > 0:
+                    new_prons.append((pos, p[0]))
+        return tuple(new_prons)
     else:
         new_ipas = list(filter(lambda i: not any(s in i.lower() for s in ['stress', 'older', 'before']), ipas))
         if len(new_ipas) == 0:
             new_ipas = list(filter(lambda i: re.match('^.*unstressed.*$', i.lower()), ipas))[:1]
             if len(new_ipas) == 0:
                 new_ipas = list(filter(lambda i: re.match('^.*consonant.*$', i.lower()), ipas))[:1]
-    return tuple(new_ipas)
+        prons = tuple(map(lambda i: ('any', i), new_ipas))
+        return prons
 
 
 def get_entry_word(definition):
