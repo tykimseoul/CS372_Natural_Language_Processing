@@ -3,6 +3,7 @@ from nltk.corpus import brown, cmudict, wordnet
 from collections import defaultdict
 from tabulate import tabulate
 from itertools import combinations
+from operator import itemgetter
 from bs4 import BeautifulSoup
 import requests
 import re
@@ -156,6 +157,7 @@ def pronounce(sent, heteronyms):
         else:
             sentence.append(word[0])
     print(' '.join(sentence))
+    return ' '.join(sentence)
 
 
 def extract_pos(definitions):
@@ -250,6 +252,19 @@ def extract_examples(content):
         return None, None
 
 
+def score(heteronyms):
+    heteronym_words = list(map(lambda h: (h[0][0], map_pos(h[0][1])), heteronyms))
+    heteronym_words = list(filter(lambda w: w[1] is not None, heteronym_words))
+    count = len(heteronym_words)
+    heteronym_set = set(map(lambda w: w[0], heteronym_words))
+    kinds = len(heteronym_set)
+    pos_variation = len(set(heteronym_words))
+    unit = 100
+    score = count * unit ** 2 + (unit - kinds) * unit + (unit - pos_variation)
+    # print(count, kinds, pos_variation, score)
+    return score
+
+
 # different stress pattern or different consonant are different pronunciations, (different vowel but same consonant and same stress) is considered similar
 '''
     considered different pronunciations:
@@ -271,5 +286,8 @@ def extract_examples(content):
 
 heteronym_sents = list(map(lambda s: (s, get_heteronyms(s)), tagged_sents))
 heteronym_sents = list(filter(lambda s: len(s[1]) > 0, heteronym_sents))
-list(map(lambda s: pronounce(s[0], s[1]), heteronym_sents))
+heteronym_sents = list(map(lambda s: (s[0], s[1], pronounce(s[0], s[1])), heteronym_sents))
+heteronym_sents = list(map(lambda s: (s[2], score(s[1])), heteronym_sents))
+heteronym_sents = sorted(heteronym_sents, key=itemgetter(1), reverse=True)
+print(tabulate(heteronym_sents))
 print(len(heteronym_sents), len(tagged_sents))
