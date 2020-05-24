@@ -6,21 +6,26 @@ from itertools import combinations
 from bs4 import BeautifulSoup
 import requests
 import re
+import pprint
 
 sample_sents = [
-    'A chair was so close to the door we couldn’t close it',
     'I wound a bandage around my wound',
+    'How much produce does the farm produce',
+    'She shed a tear because she had a tear in her shirt',
+    'A chair was so close to the door we couldn ’t close it',
+    'Farmers reap what they sow to feed it to the sow',
+    'The Polish man decided to polish his table',
     'When he wrecked his moped he moped all day',
     'Don’t just give the gift present the present',
-    'The Polish man decided to polish his table',
-    'She shed a tear because she had a tear in her shirt',
-    'Farmers reap what they sow to feed it to the sow',
-    'How much produce does the farm produce',
     'More people desert in the desert than in the mountains',
     'The researcher wanted to subject the subject to a psychology test'
 ]
 
-tagged_sents = list(map(lambda s: (list(map(lambda w: (w, ''), s.split(' ')))), sample_sents))
+pp = pprint.PrettyPrinter(indent=4)
+
+pos_mapping = {'NN[A-Z]*': 'noun', 'JJ[A-Z]*': 'adjective', 'VB[A-Z]*': 'verb', 'RB[A-Z]*': 'adverb'}
+
+tagged_sents = list(map(lambda s: nltk.pos_tag(nltk.word_tokenize(s)), sample_sents))
 # tagged_sents = brown.tagged_sents()[:100]
 dictionary_url = 'https://www.dictionary.com/browse/'
 pos_exclusions = ['\.', '\,', "''", ':', '--', '``', '\)', '\(']
@@ -104,9 +109,13 @@ def get_heteronyms(sent):
     print(sent)
     sent = list(filter(lambda w: not re.match(word_exclusions, w[0]) and not re.match(pos_exclusions, w[1]), sent))
     heteronyms = list(map(lambda w: (w, crawl_pronunciation(w[0])), sent))
-    heteronyms = list(filter(lambda w: w[1] is not None and len(w[1]) > 1, heteronyms))
+    heteronyms = list(filter(lambda w: w[1] is not None and count_pronunciations(w[1]) > 1, heteronyms))
     print('<HETERONYMS>', tabulate(heteronyms))
     return heteronyms
+
+
+def count_pronunciations(prons):
+    return sum(list(map(lambda p: len(p[0]), prons)))
 
 
 def safe_prons(w):
@@ -118,6 +127,50 @@ def safe_prons(w):
 
 def safe_meanings(w):
     return list(filter(lambda s: w in s.lemma_names(), wordnet.synsets(w)))
+
+
+def pronounce(sent, heteronyms):
+    sentence = []
+    for word in sent:
+        heteronym_words = list(map(lambda h: h[0], heteronyms))
+        if word in heteronym_words:
+            pos = map_pos(word[1])
+            heteronym_meaning = list(filter(lambda h: h[0] == word, heteronyms))
+            relevant_definitions = list(filter(lambda d: pos in extract_pos(d), heteronym_meaning[0][1]))
+            # print('relevant def for', word)
+            # pp.pprint(relevant_definitions)
+            if len(relevant_definitions) == 0:
+                sentence.append(word[0])
+                continue
+            for definition in relevant_definitions:
+                prons = dict(map(lambda d: (d[0], d[1]), definition[0]))
+                if pos in prons.keys():
+                    sentence.append(word[0] + '[' + prons[pos] + ']')
+                    break
+                elif 'any' in prons.keys():
+                    sentence.append(word[0] + '[' + prons['any'] + ']')
+                    break
+                else:
+                    sentence.append(word[0])
+                    break
+        else:
+            sentence.append(word[0])
+    print(' '.join(sentence))
+
+
+def extract_pos(definitions):
+    poses = list(map(lambda d: d[0], definitions[1]))
+    poses = list(map(lambda p: re.sub('\([^)]*\)', '', p), poses))
+    poses = list(map(lambda p: re.sub('[^\w\s]', '', p).strip(), poses))
+    return poses
+
+
+def map_pos(pos):
+    mapped = list(filter(lambda p: re.match(p[0], pos), pos_mapping.items()))
+    if len(mapped) == 0:
+        print('======== invalid pos:', pos)
+        return None
+    return mapped[0][1]
 
 
 def crawl_pronunciation(word):
@@ -132,7 +185,7 @@ def crawl_pronunciation(word):
     valid_definition_count = len(definition_headers) + 1 if definition_headers is not None else 1
     definitions = soup.findAll(class_='css-1urpfgu e16867sm0')
     definitions = list(filter(lambda d: get_entry_word(d) is not None, definitions))
-    definitions = list(filter(lambda d: get_entry_word(d).text == word, definitions[:valid_definition_count]))
+    definitions = list(filter(lambda d: get_entry_word(d).text.lower() == word, definitions[:valid_definition_count]))
     ipas = []
     examples = []
     for definition in definitions:
@@ -218,4 +271,5 @@ def extract_examples(content):
 
 heteronym_sents = list(map(lambda s: (s, get_heteronyms(s)), tagged_sents))
 heteronym_sents = list(filter(lambda s: len(s[1]) > 0, heteronym_sents))
+list(map(lambda s: pronounce(s[0], s[1]), heteronym_sents))
 print(len(heteronym_sents), len(tagged_sents))
