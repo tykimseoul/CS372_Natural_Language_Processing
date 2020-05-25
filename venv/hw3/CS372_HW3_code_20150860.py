@@ -1,4 +1,6 @@
 import nltk
+from nltk.corpus import brown
+from nltk.stem.snowball import SnowballStemmer
 from collections import defaultdict
 from tabulate import tabulate
 from operator import itemgetter
@@ -8,24 +10,28 @@ import re
 import pprint
 
 sample_sents = [
-    'I wound a bandage around my wound',
-    'How much produce does the farm produce',
-    'She shed a tear because she had a tear in her shirt',
-    'A chair was so close to the door we couldn ’t close it',
-    'Farmers reap what they sow to feed it to the sow',
-    'The Polish man decided to polish his table',
-    'When he wrecked his moped he moped all day',
-    'Don’t just give the gift present the present',
-    'More people desert in the desert than in the mountains',
-    'The researcher wanted to subject the subject to a psychology test'
+    'Medical intern and extern are employed and are good'
+    # 'I wound a bandage around my wound',
+    # 'How much produce does the farm produce',
+    # 'She shed a tear because she had a tear in her shirt',
+    # 'A wind is in the wind'
+    # 'A chair was so close to the door we couldn ’t close it',
+    # 'Farmers reap what they sow to feed it to the sow',
+    # 'The Polish man decided to polish his table',
+    # 'When he wrecked his moped he moped all day',
+    # 'Don’t just give the gift present the present',
+    # 'More people desert in the desert than in the mountains',
+    # 'The researcher wanted to subject the subject to a psychology test'
 ]
 
 pp = pprint.PrettyPrinter(indent=4)
+stemmer = SnowballStemmer("english")
 
 pos_mapping = {'NN[A-Z]*': 'noun', 'JJ[A-Z]*': 'adjective', 'VB[A-Z]*': 'verb', 'RB[A-Z]*': 'adverb'}
+simple_pos = {'NN[A-Z]*': 'NN', 'JJ[A-Z]*': 'JJ', 'VB[A-Z]*': 'VB', 'RB[A-Z]*': 'RB', 'DT': 'DT'}
 
-tagged_sents = list(map(lambda s: nltk.pos_tag(nltk.word_tokenize(s)), sample_sents))
-# tagged_sents = brown.tagged_sents()[:100]
+# tagged_sents = list(map(lambda s: nltk.pos_tag(nltk.word_tokenize(s)), sample_sents))
+tagged_sents = brown.tagged_sents()[:10]
 dictionary_url = 'https://www.dictionary.com/browse/'
 pos_exclusions = ['\.', '\,', "''", ':', '--', '``', '\)', '\(']
 pos_exclusions = "(" + ")|(".join(pos_exclusions) + ")"
@@ -48,10 +54,11 @@ def count_pronunciations(prons):
 
 def pronounce(sent, heteronyms):
     sentence = []
-    for word in sent:
-        heteronym_words = list(map(lambda h: h[0], heteronyms))
+    heteronym_words = list(map(lambda h: h[0], heteronyms))
+    trigrams = form_trigrams(sent)
+    for idx, word in enumerate(sent):
         if word in heteronym_words:
-            pos = map_pos(word[1])
+            pos = map_pos(word[1], pos_mapping)
             heteronym_meaning = list(filter(lambda h: h[0] == word, heteronyms))
             relevant_definitions = list(filter(lambda d: pos in extract_pos(d), heteronym_meaning[0][1]))
             # print('relevant def for', word)
@@ -59,21 +66,59 @@ def pronounce(sent, heteronyms):
             if len(relevant_definitions) == 0:
                 sentence.append(word[0])
                 continue
+            trigram = trigrams[idx]
+            candidates = []
             for definition in relevant_definitions:
                 prons = dict(map(lambda d: (d[0], d[1]), definition[0]))
+                examples = dict(map(lambda e: (e[0], e[1]), definition[1]))
+                examples = dict(filter(lambda e: pos in e[0], examples.items()))
                 if pos in prons.keys():
-                    sentence.append(word[0] + '[' + prons[pos] + ']')
-                    break
+                    candidates.append((prons[pos], examples))
                 elif 'any' in prons.keys():
-                    sentence.append(word[0] + '[' + prons['any'] + ']')
-                    break
+                    candidates.append((prons['any'], examples))
                 else:
                     sentence.append(word[0])
                     break
+            assert len(candidates) > 0
+            if len(candidates) == 1:
+                sentence.append(str(word) + '[' + candidates[0][0] + ']')
+                continue
+            flat_examples = list(map(lambda c: (c[0], c[1].values()), candidates))
+            flat_examples = list(map(lambda c: (c[0], [item for sublist in c[1] for item in sublist]), flat_examples))
+            print('flat', flat_examples)
+            if not any(list(map(lambda e: len(e[1]) > 0, flat_examples))) or trigram is None:
+                sentence.append(str(word) + '[' + candidates[0][0] + ']')
+                continue
+            candidate_similarity = list(map(lambda e: (e[0], measure_similarity(trigram, e[1])), flat_examples))
+            candidate_similarity = sorted(candidate_similarity, key=itemgetter(1), reverse=True)
+            print(tabulate(candidate_similarity))
+            sentence.append(str(word) + '[' + candidate_similarity[0][0] + ']')
         else:
             sentence.append(word[0])
     print(' '.join(sentence))
     return ' '.join(sentence)
+
+
+def form_trigrams(sent):
+    trigrams = list(nltk.trigrams(sent))
+    trigrams.insert(0, None)
+    trigrams.append(None)
+    return trigrams
+
+
+def measure_similarity(target, examples):
+    examples = list(map(lambda e: nltk.word_tokenize(e), examples))
+    examples = list(filter(lambda e: target[1][0] in e, examples))
+    examples = list(map(lambda e: nltk.pos_tag(e), examples))
+    examples = list(map(lambda e: list(nltk.trigrams(e)), examples))
+    examples = list(map(lambda e: list(filter(lambda t: (stemmer.stem(t[1][0]), t[1][1]) == (stemmer.stem(target[1][0]), target[1][1]), e)), examples))
+    examples = [item for sublist in examples for item in sublist]
+    if len(examples) == 0:
+        return 0
+    target = list(map(lambda t: t[1], target))
+    first_matches = len(list(filter(lambda e: map_pos(e[0][1], simple_pos) == map_pos(target[0], simple_pos), examples)))
+    second_matches = len(list(filter(lambda e: map_pos(e[2][1], simple_pos) == map_pos(target[2], simple_pos), examples)))
+    return (first_matches + second_matches) / (len(examples) * 2)
 
 
 def extract_pos(definitions):
@@ -83,8 +128,8 @@ def extract_pos(definitions):
     return poses
 
 
-def map_pos(pos):
-    mapped = list(filter(lambda p: re.match(p[0], pos), pos_mapping.items()))
+def map_pos(pos, mapping):
+    mapped = list(filter(lambda p: re.match(p[0], pos), mapping.items()))
     if len(mapped) == 0:
         print('======== invalid pos:', pos)
         return None
@@ -150,6 +195,7 @@ def simplify_ipa(ipa):
             new_ipas = list(filter(lambda i: re.match('^.*unstressed.*$', i.lower()), ipas))[:1]
             if len(new_ipas) == 0:
                 new_ipas = list(filter(lambda i: re.match('^.*consonant.*$', i.lower()), ipas))[:1]
+        new_ipas = list(filter(lambda i: not i.lower().startswith('for'), new_ipas))
         prons = tuple(map(lambda i: ('any', i), new_ipas))
         return prons
 
@@ -169,7 +215,7 @@ def extract_examples(content):
 
 
 def score(heteronyms):
-    heteronym_words = list(map(lambda h: (h[0][0], map_pos(h[0][1])), heteronyms))
+    heteronym_words = list(map(lambda h: (h[0][0], map_pos(h[0][1], pos_mapping)), heteronyms))
     heteronym_words = list(filter(lambda w: w[1] is not None, heteronym_words))
     count = len(heteronym_words)
     heteronym_set = set(map(lambda w: w[0], heteronym_words))
