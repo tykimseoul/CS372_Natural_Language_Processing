@@ -297,25 +297,6 @@ def score(heteronyms):
     return score
 
 
-# different stress pattern or different consonant are different pronunciations, (different vowel but same consonant and same stress) is considered similar
-'''
-    considered different pronunciations:
-        1. different stress pattern
-        OR
-        2. different consonants
-'''
-'''
-    goal words:
-        1. research
-        2. juvenile
-        3. replace
-'''
-# concatenate y pron with the next because that does not infer heteronym; heteronyms are not distinguished by addition of y
-# look at the larger result and combine exceptions such as center, government, county etc
-# pronunciations such as N+T->N, H+W->W; this is more of an accent difference than a pronunciation
-# only one pronunciation should have it, N+T is followed by a vowel
-# check consonant after changing and combine if same
-
 # find heteronyms of each sentence
 heteronym_sents = list(map(lambda s: (s, get_heteronyms(s)), tagged_sents))
 # filter out sentences without heteronyms
