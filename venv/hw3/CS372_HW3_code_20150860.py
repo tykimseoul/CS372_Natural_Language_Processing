@@ -7,32 +7,30 @@ from operator import itemgetter
 from bs4 import BeautifulSoup
 import requests
 import re
-import pprint
 
 sample_sents = [
     'Medical intern and extern are employed and are good'
-    # 'I wound a bandage around my wound',
-    # 'How much produce does the farm produce',
-    # 'She shed a tear because she had a tear in her shirt',
-    # 'A wind is in the wind'
-    # 'A chair was so close to the door we couldn ’t close it',
-    # 'Farmers reap what they sow to feed it to the sow',
-    # 'The Polish man decided to polish his table',
-    # 'When he wrecked his moped he moped all day',
-    # 'Don’t just give the gift present the present',
-    # 'More people desert in the desert than in the mountains',
-    # 'The researcher wanted to subject the subject to a psychology test'
+    'I wound a bandage around my wound',
+    'How much produce does the farm produce',
+    'She shed a tear because she had a tear in her shirt',
+    'A wind is in the wind'
+    'A chair was so close to the door we couldn ’t close it',
+    'Farmers reap what they sow to feed it to the sow',
+    'The Polish man decided to polish his table',
+    'When he wrecked his moped he moped all day',
+    'Don’t just give the gift present the present',
+    'More people desert in the desert than in the mountains',
+    'The researcher wanted to subject the subject to a psychology test'
 ]
 
-pp = pprint.PrettyPrinter(indent=4)
 stemmer = SnowballStemmer("english")
 
 # mappings to simplify pos tags
 pos_mapping = {'NN[A-Z]*': 'noun', 'JJ[A-Z]*': 'adjective', 'VB[A-Z]*': 'verb', 'RB[A-Z]*': 'adverb'}
 simple_pos = {'NN[A-Z]*': 'NN', 'JJ[A-Z]*': 'JJ', 'VB[A-Z]*': 'VB', 'RB[A-Z]*': 'RB', 'DT': 'DT'}
 
-tagged_sents = list(map(lambda s: nltk.pos_tag(nltk.word_tokenize(s)), sample_sents))
-# tagged_sents = brown.tagged_sents()[:1]
+# tagged_sents = list(map(lambda s: nltk.pos_tag(nltk.word_tokenize(s)), sample_sents))
+tagged_sents = brown.tagged_sents()[:100]
 
 dictionary_url = 'https://www.dictionary.com/browse/'
 
@@ -78,8 +76,6 @@ def pronounce(sent, heteronyms):
             heteronym_meaning = list(filter(lambda h: h[0] == word, heteronyms))
             # filter out definitions that does not include pos of the word
             relevant_definitions = list(filter(lambda d: pos in extract_pos(d), heteronym_meaning[0][1]))
-            # print('relevant def for', word)
-            # pp.pprint(relevant_definitions)
             # if no definition is used as the pos of the word, do not annotate it
             if len(relevant_definitions) == 0:
                 sentence.append(word[0])
@@ -285,6 +281,8 @@ def extract_examples(content):
 def score(heteronyms):
     heteronym_words = list(map(lambda h: (h[0][0], map_pos(h[0][1], pos_mapping)), heteronyms))
     heteronym_words = list(filter(lambda w: w[1] is not None, heteronym_words))
+    if len(heteronym_words) == 0:
+        return 0
     # number of heteronym occurrences (criteria #1)
     count = len(heteronym_words)
     heteronym_set = set(map(lambda w: w[0], heteronym_words))
