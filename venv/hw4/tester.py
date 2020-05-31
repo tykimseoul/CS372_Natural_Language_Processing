@@ -1,10 +1,7 @@
-from bs4 import BeautifulSoup
 import requests
-import nltk
 from nltk.stem.snowball import SnowballStemmer
 import re
 from tabulate import tabulate
-import csv
 import time
 import pandas as pd
 
@@ -71,5 +68,13 @@ def collapse_testcases(df):
     return collapsed_testcases
 
 
-testcase_df = read_test_cases(2020, 2014)
-testcases = collapse_testcases(testcase_df)
+def test_with(extractor):
+    df = read_test_cases(2020, 2014)
+    testcases = collapse_testcases(df)
+    sentences = list(map(lambda t: t.sentence, testcases))
+    relations = list(map(lambda t: t.triples, testcases))
+    extractions = list(map(lambda t: extractor.extract(t.sentence), testcases))
+    test_size = len(testcases)
+    assert [len(sentences), len(relations), len(extractions)] == [test_size, test_size, test_size]
+    df = pd.DataFrame({'sentence': sentences, 'relations': relations, 'extractions': extractions})
+    print('===== RESULT =====\n', len(df[df['relations'] == df['extractions']]) / len(df))

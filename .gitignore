@@ -3,3 +3,4 @@ venv/lib
 venv/bin
 pip-selfcheck.json
 pyvenv.cfg
+venv/hw4/__pycache__
