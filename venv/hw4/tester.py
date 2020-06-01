@@ -52,7 +52,8 @@ def read_test_cases(start, end):
 
 
 def collapse_testcases(df):
-    testcases = [TestCase(row[0], row[1], row[2], row[3].strip(), {Triple(row[4], row[5], row[6], row[7])}) for row in df[['id', 'year', 'org', 'sentence', 'type', 'X', 'action', 'Y']].values]
+    testcases = [TestCase(row[0], row[1], row[2], clean_sentence(row[3]), {Triple(row[4], row[5], row[6], row[7])}) for row in
+                 df[['id', 'year', 'org', 'sentence', 'type', 'X', 'action', 'Y']].values]
     collapse_index = 0
     collapsed_testcases = []
     for idx, t in enumerate(testcases):
@@ -66,6 +67,21 @@ def collapse_testcases(df):
     print("testcase size:", len(collapsed_testcases))
     assert df['sentence'].nunique() == len(collapsed_testcases)
     return collapsed_testcases
+
+
+def clean_sentence(sent):
+    exclusions = (
+        'Aim', 'Background', 'Introduction', 'Objective', 'Aims and objectives', 'Clinical relevance', 'Clinical significance', 'Conclusion', 'Conclusions', 'Impact', 'Main outcome measures',
+        'Materials and methods', 'Methods', 'PRACTICAL APPLICATIONS', 'Purpose', 'Results')
+    exclusions = tuple(map(lambda s: s + ':', exclusions))
+    sent = re.sub('\\([^)]*\\)', '', sent)
+    sent = re.sub('\\s\\s+', " ", sent.strip())
+    if sent.startswith(exclusions):
+        idx = sent.index(':')
+        sent = sent[idx + 1:]
+    sent = sent.strip()
+    print(sent)
+    return sent
 
 
 def test_with(extractor):
