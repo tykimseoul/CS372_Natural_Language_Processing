@@ -42,6 +42,7 @@ def read_test_cases(start, end):
         df = pd.read_csv('corpus_tagged_{}.csv'.format(year), encoding='unicode_escape')
         df.drop(df.columns[[8, 9, 10, 11, 12, 13]], axis=1, inplace=True)
         df.drop(df[df.type == -1].index, inplace=True)
+        df.drop(df[df.type == 0].index, inplace=True)
         dfs.append(df)
         print(df.head())
     full_df = pd.concat(dfs, axis=0)
