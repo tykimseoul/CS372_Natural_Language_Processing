@@ -26,7 +26,7 @@ class TestCase:
 
 
 class Triple:
-    def __init__(self, type, x, action, y):
+    def __init__(self, type=None, x=None, action=None, y=None):
         self.type = type
         self.x = x
         self.action = action
