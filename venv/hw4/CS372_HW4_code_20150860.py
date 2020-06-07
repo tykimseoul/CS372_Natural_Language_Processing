@@ -9,7 +9,13 @@ def extract_noun(phrase):
     if type(phrase) == nltk.tree.Tree:
         words = list(map(lambda p: p[0], phrase.flatten()))
         print(words)
-        if 'of' in words or 'by' in words or 'in' in words:
+        # with and in should precede and/or??
+        if 'and' in words or 'or' in words:
+            phrase.pretty_print()
+            phrase = list(map(lambda p: p[0], phrase.flatten()))
+            result = ' '.join(phrase)
+            result = re.sub("\s+,", ",", result)
+        elif 'of' in words or 'by' in words or 'in' in words or 'about' in words or 'for' in words or 'from' in words or 'under' in words or 'with' in words or 'than' in words:
             result = extract_noun(phrase[0])
         else:
             phrase.pretty_print()
@@ -28,7 +34,7 @@ def extract_noun(phrase):
 
 def extract_verb(phrase):
     phrase = phrase.flatten()
-    phrase = list(filter(lambda p: not re.match('(RB.?)|(JJ.?)', p[1]), phrase))
+    phrase = list(filter(lambda p: not re.match('(RB.?)|(JJ.?)', p[1]) if p[0] not in ['not'] else True, phrase))
     phrase = list(map(lambda p: p[0], phrase))
     return ' '.join(phrase)
 
@@ -41,7 +47,8 @@ def parse_with(sentence, grammar):
 def is_inflection_of(verbs, words):
     verbs = list(map(lambda w: stemmer.stem(w), verbs))
     verbs_regex = "^(" + ")|^(".join(verbs) + ")"
-    word_match = list(map(lambda w: re.match(verbs_regex, w), nltk.word_tokenize(words)))
+    words = list(filter(lambda w: not w.endswith('ing'), nltk.word_tokenize(words)))
+    word_match = list(map(lambda w: re.match(verbs_regex, w), words))
     return any(word_match)
 
 
@@ -55,7 +62,8 @@ stemmer = SnowballStemmer("english")
 class Extractor:
     def __init__(self):
         self.noun_grammar = """
-        NP: {<DT>?<JJ>*<NN.?>*}
+        NP: {<DT>?<JJ.?>*<NN.?>+}
+        NP: {<PRP.?><NN.?>+}
         NP: {<NP><,>?<CC><NP>}
         NP: {<NP><,><NP>}
         NP: {<CD><NP>}

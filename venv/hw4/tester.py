@@ -61,7 +61,7 @@ def read_test_cases(start, end):
 
 
 def collapse_testcases(df):
-    testcases = [TestCase(row[0], row[1], row[2], clean_sentence(row[3]), {Triple(row[4], row[5], row[6], row[7])}) for row in
+    testcases = [TestCase(row[0], row[1], row[2], clean_sentence(row[3]), {Triple(row[4], remove_parentheses(row[5]), row[6], remove_parentheses(row[7]))}) for row in
                  df[['id', 'year', 'org', 'sentence', 'type', 'X', 'action', 'Y']].values]
     collapse_index = 0
     collapsed_testcases = []
@@ -83,7 +83,7 @@ def clean_sentence(sent):
         'Aim', 'Background', 'Introduction', 'Objective', 'Aims and objectives', 'Clinical relevance', 'Clinical significance', 'Conclusion', 'Conclusions', 'Impact', 'Main outcome measures',
         'Materials and methods', 'Methods', 'PRACTICAL APPLICATIONS', 'Purpose', 'Results')
     exclusions = tuple(map(lambda s: s + ':', exclusions))
-    sent = re.sub('\\([^)]*\\)', '', sent)
+    sent = remove_parentheses(sent)
     sent = re.sub('\\s\\s+', " ", sent.strip())
     if sent.startswith(exclusions):
         idx = sent.index(':')
@@ -91,6 +91,9 @@ def clean_sentence(sent):
     sent = sent.strip()
     print(sent)
     return sent
+
+def remove_parentheses(sent):
+    return re.sub('\\([^)]*\\)', '', sent)
 
 
 def test_with(extractor):
