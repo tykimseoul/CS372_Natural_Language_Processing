@@ -4,12 +4,19 @@ import re
 from nltk.stem.snowball import SnowballStemmer
 
 
-def extract_match(np, pattern):
-    np = np.flatten()
-    for n in np[::-1]:
-        assert type(n) == tuple
-        if re.match(pattern, n[1]):
-            return n[0]
+def extract_match(phrase):
+    print('extracting', phrase)
+    if phrase.label() == 'NP':
+        phrase = phrase.flatten()
+        for n in phrase[::-1]:
+            assert type(n) == tuple
+            if re.match('NN.?', n[1]):
+                return n[0]
+    else:
+        phrase = phrase.flatten()
+        phrase = list(filter(lambda p: not re.match('(RB.?)|(JJ.?)', p[1]), phrase))
+        phrase = list(map(lambda p: p[0], phrase))
+        return ' '.join(phrase)
 
 
 def parse_with(sentence, grammar):
@@ -17,10 +24,11 @@ def parse_with(sentence, grammar):
     return cp.parse(sentence)
 
 
-def is_inflection_of(verbs, word):
+def is_inflection_of(verbs, words):
     verbs = list(map(lambda w: stemmer.stem(w), verbs))
     verbs_regex = "^(" + ")|^(".join(verbs) + ")"
-    return re.match(verbs_regex, word)
+    word_match = list(map(lambda w: re.match(verbs_regex, w), nltk.word_tokenize(words)))
+    return any(word_match)
 
 
 relevant_verbs = ['activate', 'inhibit', 'bind']
@@ -38,18 +46,21 @@ class Extractor:
         NP: {<NP><,><NP>}
         NP: {<CD><NP>}
         """
-        self.verb_grammar = """
-        VP: {<MD>*<VB.?>*<RB.?>*<VB.?><RB.?>*}
+        self.active_verb_grammar = """
+        ACT: {<MD>*<VB.?>*<RB.?>*<VB.?><RB.?>*}
+        """
+        self.passive_verb_grammar = """
+        PSV: {<VBD><RB.?>*<VBN><RB.?>*<IN>}
         """
         self.clause_grammar = """
-        CL: {<NP><VP><NP>}
+        CL: {<NP><ACT|PSV><NP>}
         """
         # VP: {<VB.?><NP>}
         # VP: {<VVP><NP>(<TO><VP>)?}
         # NP: {<NP><IN><VP>}
         # NP: {<NP><,>?<WDT><VP>}
 
-    def parse_vp(self, tree):
+    def parse_passive_verbs(self, tree):
         phrases = []
         phrase = []
         for s in tree:
@@ -60,21 +71,43 @@ class Extractor:
                     phrases.append(phrase)
                     phrase = []
                 phrases.append(s)
-        phrases = list(map(lambda p: parse_with(p, self.verb_grammar) if type(p) == list else p, phrases))
+        phrases_parsed = []
+        for p in phrases:
+            if type(p) == list:
+                parsed = parse_with(p, self.passive_verb_grammar)
+                for ps in parsed:
+                    phrases_parsed.append(ps)
+            else:
+                phrases_parsed.append(p)
+        return phrases_parsed
+
+    def parse_active_verbs(self, tree):
+        phrases = []
+        phrase = []
+        for s in tree:
+            if type(s) == tuple:
+                phrase.append(s)
+            else:
+                if len(phrase) > 0:
+                    phrases.append(phrase)
+                    phrase = []
+                phrases.append(s)
+        phrases = list(map(lambda p: parse_with(p, self.active_verb_grammar) if type(p) == list else p, phrases))
         return phrases
 
     def extract(self, sentence):
         print(sentence)
         sentence = nltk.pos_tag(nltk.word_tokenize(sentence))
         result = parse_with(sentence, self.noun_grammar)
-        verbs = self.parse_vp(result)
+        result = self.parse_passive_verbs(result)
+        result = self.parse_active_verbs(result)
         clauses = []
-        for p in verbs:
-            assert p.label() in ['S', 'NP']
+        for p in result:
+            assert p.label() in ['S', 'NP', 'ACT', 'PSV']
             if p.label() == 'S':
                 for subtree in p:
                     if type(subtree) == nltk.tree.Tree:
-                        assert subtree.label() in ['S', 'VP']
+                        assert subtree.label() in ['S', 'ACT', 'PSV']
                         if subtree.label() == 'S':
                             continue
                         else:
@@ -95,11 +128,11 @@ class Extractor:
                 for p in cl:
                     if p.label() == 'NP':
                         if triple.action is None:
-                            triple.x = extract_match(p, 'NN.?')
+                            triple.x = extract_match(p)
                         else:
-                            triple.y = extract_match(p, 'NN.?')
-                    elif p.label() == 'VP':
-                        triple.action = extract_match(p, 'VB.?')
+                            triple.y = extract_match(p)
+                    elif p.label() in ['ACT', 'PSV']:
+                        triple.action = extract_match(p)
                     else:
                         pass
                 triples.add(triple)
