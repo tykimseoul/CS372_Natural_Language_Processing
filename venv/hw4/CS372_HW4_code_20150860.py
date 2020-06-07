@@ -4,19 +4,33 @@ import re
 from nltk.stem.snowball import SnowballStemmer
 
 
-def extract_match(phrase):
+def extract_noun(phrase):
     print('extracting', phrase)
-    if phrase.label() == 'NP':
-        phrase = phrase.flatten()
-        for n in phrase[::-1]:
-            assert type(n) == tuple
-            if re.match('NN.?', n[1]):
-                return n[0]
+    if type(phrase) == nltk.tree.Tree:
+        words = list(map(lambda p: p[0], phrase.flatten()))
+        print(words)
+        if 'of' in words or 'by' in words or 'in' in words:
+            result = extract_noun(phrase[0])
+        else:
+            phrase.pretty_print()
+            phrase = list(map(lambda p: p[0], phrase.flatten()))
+            result = ' '.join(phrase)
+            result = re.sub("\s+,", ",", result)
+        result = nltk.word_tokenize(result)
+        if result[0].lower() in ['the', 'a', 'an']:
+            result = result[1:]
+        result = ' '.join(result)
+        result = re.sub("\s+,", ",", result)
+        return result
     else:
-        phrase = phrase.flatten()
-        phrase = list(filter(lambda p: not re.match('(RB.?)|(JJ.?)', p[1]), phrase))
-        phrase = list(map(lambda p: p[0], phrase))
-        return ' '.join(phrase)
+        return phrase[0]
+
+
+def extract_verb(phrase):
+    phrase = phrase.flatten()
+    phrase = list(filter(lambda p: not re.match('(RB.?)|(JJ.?)', p[1]), phrase))
+    phrase = list(map(lambda p: p[0], phrase))
+    return ' '.join(phrase)
 
 
 def parse_with(sentence, grammar):
@@ -45,6 +59,7 @@ class Extractor:
         NP: {<NP><,>?<CC><NP>}
         NP: {<NP><,><NP>}
         NP: {<CD><NP>}
+        NP: {<NP><IN><NP>}
         """
         self.active_verb_grammar = """
         ACT: {<MD>*<VB.?>*<RB.?>*<VB.?><RB.?>*}
@@ -99,6 +114,7 @@ class Extractor:
         print(sentence)
         sentence = nltk.pos_tag(nltk.word_tokenize(sentence))
         result = parse_with(sentence, self.noun_grammar)
+        result.pretty_print()
         result = self.parse_passive_verbs(result)
         result = self.parse_active_verbs(result)
         clauses = []
@@ -128,11 +144,13 @@ class Extractor:
                 for p in cl:
                     if p.label() == 'NP':
                         if triple.action is None:
-                            triple.x = extract_match(p)
+                            triple.x = extract_noun(p)
+                            print("extracted", triple.x)
                         else:
-                            triple.y = extract_match(p)
+                            triple.y = extract_noun(p)
+                            print("extracted", triple.y)
                     elif p.label() in ['ACT', 'PSV']:
-                        triple.action = extract_match(p)
+                        triple.action = extract_verb(p)
                     else:
                         pass
                 triples.add(triple)
