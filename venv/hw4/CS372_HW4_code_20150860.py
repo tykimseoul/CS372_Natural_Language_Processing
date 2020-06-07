@@ -1,6 +1,7 @@
 import nltk
 import tester as tst
 import re
+from nltk.stem.snowball import SnowballStemmer
 
 
 def extract_match(np, pattern):
@@ -14,6 +15,19 @@ def extract_match(np, pattern):
 def parse_with(sentence, grammar):
     cp = nltk.RegexpParser(grammar)
     return cp.parse(sentence)
+
+
+def is_inflection_of(verbs, word):
+    verbs = list(map(lambda w: stemmer.stem(w), verbs))
+    verbs_regex = "^(" + ")|^(".join(verbs) + ")"
+    return re.match(verbs_regex, word)
+
+
+relevant_verbs = ['activate', 'inhibit', 'bind']
+positive_verbs = ['accelerate', 'augment', 'induce', 'stimulate', 'require', 'up-regulate']
+negative_verbs = ['abolish', 'block', 'down-regulate', 'prevent']
+
+stemmer = SnowballStemmer("english")
 
 
 class Extractor:
@@ -47,8 +61,6 @@ class Extractor:
                     phrase = []
                 phrases.append(s)
         phrases = list(map(lambda p: parse_with(p, self.verb_grammar) if type(p) == list else p, phrases))
-        for v in phrases:
-            print('v', v, type(v))
         return phrases
 
     def extract(self, sentence):
@@ -90,8 +102,11 @@ class Extractor:
                         triple.action = extract_match(p, 'VB.?')
                     else:
                         pass
-                print(triple.to_string())
                 triples.add(triple)
+        triples = set(filter(lambda t: is_inflection_of(relevant_verbs, t.action)
+                                       or is_inflection_of(positive_verbs, t.action)
+                                       or is_inflection_of(negative_verbs, t.action), triples))
+        print(triples)
         return triples
 
 

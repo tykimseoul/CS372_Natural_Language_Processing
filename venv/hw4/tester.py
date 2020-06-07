@@ -32,8 +32,16 @@ class Triple:
         self.action = action
         self.y = y
 
-    def to_string(self):
+    def __str__(self):
         return 'Triple({}, {}, {}, {})'.format(self.type, self.x, self.action, self.y)
+
+    def __eq__(self, other):
+        if isinstance(other, Triple):
+            return self.x == other.x and self.action == other.action and self.y == other.y
+        return False
+
+    def __hash__(self):
+        return hash(tuple((self.x, self.action, self.y)))
 
 
 def read_test_cases(start, end):
@@ -94,4 +102,6 @@ def test_with(extractor):
     test_size = len(testcases)
     assert [len(sentences), len(relations), len(extractions)] == [test_size, test_size, test_size]
     df = pd.DataFrame({'sentence': sentences, 'relations': relations, 'extractions': extractions})
-    print('===== RESULT =====\n', len(df[df['relations'] == df['extractions']]) / len(df))
+    incorrect = df[df['relations'] != df['extractions']]
+    print(incorrect.head(100))
+    print('===== RESULT =====\n', len(incorrect), len(df))
