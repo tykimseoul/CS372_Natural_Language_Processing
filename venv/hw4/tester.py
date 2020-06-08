@@ -4,13 +4,17 @@ import re
 from tabulate import tabulate
 import time
 import pandas as pd
+import crawler as crl
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
 pd.set_option('display.max_colwidth', 200)
 pd.set_option('display.max_rows', None)
 
-
+'''
+Class definition for the TestCase class.
+Encapsulates the id, year, organization, sentence and the set of triples.
+'''
 class TestCase:
     def __init__(self, id, year, organization, sentence, triples):
         self.id = id
@@ -35,6 +39,10 @@ class TestCase:
         }
 
 
+'''
+Class definition for the Triple class.
+Encapsulates the type, X, action and Y.
+'''
 class Triple:
     def __init__(self, type=None, x=None, action=None, y=None):
         self.type = type
@@ -45,6 +53,9 @@ class Triple:
     def __str__(self):
         return 'Triple({}, {}, {}, {})'.format(self.type, self.x, self.action, self.y)
 
+    def __repr__(self):
+        return self.__str__()
+
     def __eq__(self, other):
         if isinstance(other, Triple):
             return self.x == other.x and self.action == other.action and self.y == other.y
@@ -54,6 +65,7 @@ class Triple:
         return hash(tuple((self.x, self.action, self.y)))
 
 
+'''read testcases from the tagged corpus files from year 'start' to year 'end'.'''
 def read_test_cases(start, end):
     dfs = []
     for year in range(start, end - 1, -1):
@@ -69,6 +81,7 @@ def read_test_cases(start, end):
     return full_df
 
 
+'''collapse instances of testcases for cases in which a single sentence contains multiple triples.'''
 def collapse_testcases(df):
     testcases = [TestCase(row[0], row[1], row[2], clean_sentence(row[3]), {Triple(row[4], remove_parentheses(row[5]), row[6], remove_parentheses(row[7]))})
                  if row[4] != 0 else TestCase(row[0], row[1], row[2], clean_sentence(row[3]), set())
@@ -89,6 +102,7 @@ def collapse_testcases(df):
     return collapsed_testcases
 
 
+'''ensure that only 20 sentences are collected for each type of triples.'''
 def clip_triple_types(df):
     types = []
     for i in range(6):
@@ -103,6 +117,7 @@ def clip_triple_types(df):
     return clipped
 
 
+'''clean sentences for irrelevant words and formats'''
 def clean_sentence(sent):
     exclusions = (
         'Aim', 'Background', 'Introduction', 'Objective', 'Aims and objectives', 'Clinical relevance', 'Clinical significance', 'Conclusion', 'Conclusions', 'Impact', 'Main outcome measures',
@@ -118,10 +133,12 @@ def clean_sentence(sent):
     return sent
 
 
+'''ignore words contained in parentheses to prevent confusing RegexpParser'''
 def remove_parentheses(sent):
     return re.sub('\\([^)]*\\)', '', sent)
 
 
+'''main testing function using an extractor and the corpus'''
 def test_with(extractor):
     df = read_test_cases(2020, 2014)
     testcases = collapse_testcases(df)
@@ -131,8 +148,10 @@ def test_with(extractor):
     testing_testcases = testcases.drop(training_testcases.index)
     calculate_performance(extractor, training_testcases)
     calculate_performance(extractor, testing_testcases)
+    write_output(testcases)
 
 
+'''calculate performance of the extractor for the provided testcases in terms of precision, recall and f-score.'''
 def calculate_performance(extractor, testcases):
     testcases['extractions'] = testcases.apply(lambda t: extractor.extract(t['sentence']), axis=1)
     incorrect = testcases[testcases['triples'] != testcases['extractions']]
@@ -146,3 +165,13 @@ def calculate_performance(extractor, testcases):
     recall = len(true_positive) / (len(true_positive) + len(false_negative))
     f_score = (2 * precision * recall) / (precision + recall)
     print('Precision: {}\nRecall: {}\nF-score: {}'.format(precision, recall, f_score))
+
+
+'''write output to a csv file'''
+def write_output(df):
+    df = df[df['triples'].apply(lambda t: len(t) > 0)]
+    print('getting titles..')
+    # crawl titles for each id because I forgot to collect titles when crawling abstracts
+    df['title'] = df.apply(lambda r: crl.crawl_title(r['id']), axis=1)
+    print(df.head())
+    df.to_csv('CS372_HW4_output_20150860.csv')

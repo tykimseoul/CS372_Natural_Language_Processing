@@ -107,12 +107,26 @@ def search_year(year):
     return relevant_articles
 
 
-while len(articles) < 300:
-    year_articles = search_year(crawling_year)
-    articles.extend(year_articles)
-    with open('corpus_untagged_{}.csv'.format(crawling_year), 'w') as csv_file:
-        wr = csv.writer(csv_file)
-        for article in year_articles:
-            for i in article.relevant_sents:
-                wr.writerow(list(article) + [i.strip()])
-    crawling_year -= 1
+def crawl_title(id):
+    id = str(id)
+    try:
+        html = requests.get(medline_url + id)
+    except requests.exceptions.ConnectionError as e:
+        print('pausing..', e)
+        time.sleep(10)
+        html = requests.get(medline_url + id)
+    soup = BeautifulSoup(html.text, "html.parser")
+    title = soup.find(class_='heading-title').text.strip()
+    return title
+
+
+if __name__ == "__main__":
+    while len(articles) < 300:
+        year_articles = search_year(crawling_year)
+        articles.extend(year_articles)
+        with open('corpus_untagged_{}.csv'.format(crawling_year), 'w') as csv_file:
+            wr = csv.writer(csv_file)
+            for article in year_articles:
+                for i in article.relevant_sents:
+                    wr.writerow(list(article) + [i.strip()])
+        crawling_year -= 1
