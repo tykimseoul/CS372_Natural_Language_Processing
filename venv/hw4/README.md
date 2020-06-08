@@ -10,4 +10,5 @@
 2: verb `inhibit`  
 3: verb `bind`  
 4: positive verbs (one of `accelerate`, `augment`, `induce`, `stimulate`, `require`, `up-regulate`)  
-5: negative verbs (one of `abolish`, `block`, `down-regulate`, `prevent`)
+5: negative verbs (one of `abolish`, `block`, `down-regulate`, `prevent`)  
+* The results of `crawler.py` are suffixed with 'untaged_{year}'. It was edited in Excel and exported as csv suffixed 'tagged_{year}'.
