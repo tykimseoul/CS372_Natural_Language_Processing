@@ -4,18 +4,21 @@ import re
 from nltk.stem.snowball import SnowballStemmer
 
 
+'''extract noun from a noun phrase tree'''
 def extract_noun(phrase):
     print('extracting', phrase)
     if type(phrase) == nltk.tree.Tree:
         words = list(map(lambda p: p[0], phrase.flatten()))
         print(words)
-        # with and in should precede and/or??
+        # maybe with and in should precede and/or??
         if 'and' in words or 'or' in words:
+            # take the whole tree
             phrase.pretty_print()
             phrase = list(map(lambda p: p[0], phrase.flatten()))
             result = ' '.join(phrase)
             result = re.sub("\s+,", ",", result)
         elif 'of' in words or 'by' in words or 'in' in words or 'about' in words or 'for' in words or 'from' in words or 'under' in words or 'with' in words or 'than' in words:
+            # take the first subtree
             result = extract_noun(phrase[0])
         else:
             phrase.pretty_print()
@@ -23,6 +26,7 @@ def extract_noun(phrase):
             result = ' '.join(phrase)
             result = re.sub("\s+,", ",", result)
         result = nltk.word_tokenize(result)
+        # remove articles(DT)
         if result[0].lower() in ['the', 'a', 'an']:
             result = result[1:]
         result = ' '.join(result)
@@ -32,6 +36,7 @@ def extract_noun(phrase):
         return phrase[0]
 
 
+'''extract verbs from the provided verb phrase'''
 def extract_verb(phrase):
     phrase = phrase.flatten()
     phrase = list(filter(lambda p: not re.match('(RB.?)|(JJ.?)', p[1]) if p[0] not in ['not'] else True, phrase))
@@ -39,14 +44,17 @@ def extract_verb(phrase):
     return ' '.join(phrase)
 
 
+'''parse the given sentence with the provided grammar rules'''
 def parse_with(sentence, grammar):
     cp = nltk.RegexpParser(grammar)
     return cp.parse(sentence)
 
 
+'''determine of the provided word is an inflection of one of verbs in verbs list.'''
 def is_inflection_of(verbs, words):
     verbs = list(map(lambda w: stemmer.stem(w), verbs))
     verbs_regex = "^(" + ")|^(".join(verbs) + ")"
+    # ignore gerund forms
     words = list(filter(lambda w: not w.endswith('ing'), nltk.word_tokenize(words)))
     word_match = list(map(lambda w: re.match(verbs_regex, w), words))
     return any(word_match)
@@ -58,7 +66,10 @@ negative_verbs = ['abolish', 'block', 'down-regulate', 'prevent']
 
 stemmer = SnowballStemmer("english")
 
-
+'''
+Class definition for the Extractor class.
+Encapsulates grammar rules, parsing functions and extracting functions.
+'''
 class Extractor:
     def __init__(self):
         self.noun_grammar = """
@@ -83,9 +94,11 @@ class Extractor:
         # NP: {<NP><IN><VP>}
         # NP: {<NP><,>?<WDT><VP>}
 
+    '''parses passive forms of verbs from a given tree of a sentence.'''
     def parse_passive_verbs(self, tree):
         phrases = []
         phrase = []
+        # only consider words that are not part of other phrases (e.g. NP)
         for s in tree:
             if type(s) == tuple:
                 phrase.append(s)
@@ -95,6 +108,7 @@ class Extractor:
                     phrase = []
                 phrases.append(s)
         phrases_parsed = []
+        # parse lists of words that are not part of other phrases.
         for p in phrases:
             if type(p) == list:
                 parsed = parse_with(p, self.passive_verb_grammar)
@@ -104,6 +118,7 @@ class Extractor:
                 phrases_parsed.append(p)
         return phrases_parsed
 
+    '''parses active forms of verbs from a given tree of a sentence.'''
     def parse_active_verbs(self, tree):
         phrases = []
         phrase = []
@@ -115,17 +130,22 @@ class Extractor:
                     phrases.append(phrase)
                     phrase = []
                 phrases.append(s)
+        # parse lists of words that are not part of other phrases.
         phrases = list(map(lambda p: parse_with(p, self.active_verb_grammar) if type(p) == list else p, phrases))
         return phrases
 
     def extract(self, sentence):
         print(sentence)
         sentence = nltk.pos_tag(nltk.word_tokenize(sentence))
+        # parse noun phrases first
         result = parse_with(sentence, self.noun_grammar)
         result.pretty_print()
+        # then parse passive forms of verbs
         result = self.parse_passive_verbs(result)
+        # then parse active forms of verbs
         result = self.parse_active_verbs(result)
         clauses = []
+        # merge trees of NP, VP and other nodes into a single tree
         for p in result:
             assert p.label() in ['S', 'NP', 'ACT', 'PSV']
             if p.label() == 'S':
@@ -137,6 +157,7 @@ class Extractor:
                         else:
                             clauses.append(subtree)
                     else:
+                        # irrelevant nodes
                         t = nltk.tree.Tree('IRR', [])
                         t.append(subtree)
                         clauses.append(t)
@@ -146,6 +167,7 @@ class Extractor:
         clauses = parse_with(tree, self.clause_grammar)
         clauses.pretty_print()
         triples = set()
+        # extract triples from clauses which contain NP and VP
         for cl in clauses:
             if cl.label() == 'CL':
                 triple = tst.Triple()
@@ -162,6 +184,7 @@ class Extractor:
                     else:
                         pass
                 triples.add(triple)
+        # filter out triples that are not relevant verbs
         triples = set(filter(lambda t: is_inflection_of(relevant_verbs, t.action)
                                        or is_inflection_of(positive_verbs, t.action)
                                        or is_inflection_of(negative_verbs, t.action), triples))
