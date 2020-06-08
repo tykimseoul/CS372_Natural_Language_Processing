@@ -3,7 +3,6 @@ import requests
 import nltk
 from nltk.stem.snowball import SnowballStemmer
 import re
-from tabulate import tabulate
 import csv
 import time
 

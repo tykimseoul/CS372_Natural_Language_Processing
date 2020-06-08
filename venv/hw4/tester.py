@@ -1,7 +1,6 @@
 import requests
 from nltk.stem.snowball import SnowballStemmer
 import re
-from tabulate import tabulate
 import time
 import pandas as pd
 import crawler as crl
