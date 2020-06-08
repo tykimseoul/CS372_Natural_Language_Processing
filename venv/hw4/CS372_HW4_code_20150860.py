@@ -6,14 +6,11 @@ from nltk.stem.snowball import SnowballStemmer
 
 '''extract noun from a noun phrase tree'''
 def extract_noun(phrase):
-    print('extracting', phrase)
     if type(phrase) == nltk.tree.Tree:
         words = list(map(lambda p: p[0], phrase.flatten()))
-        print(words)
         # maybe with and in should precede and/or??
         if 'and' in words or 'or' in words:
             # take the whole tree
-            phrase.pretty_print()
             phrase = list(map(lambda p: p[0], phrase.flatten()))
             result = ' '.join(phrase)
             result = re.sub("\s+,", ",", result)
@@ -21,7 +18,6 @@ def extract_noun(phrase):
             # take the first subtree
             result = extract_noun(phrase[0])
         else:
-            phrase.pretty_print()
             phrase = list(map(lambda p: p[0], phrase.flatten()))
             result = ' '.join(phrase)
             result = re.sub("\s+,", ",", result)
@@ -139,7 +135,6 @@ class Extractor:
         sentence = nltk.pos_tag(nltk.word_tokenize(sentence))
         # parse noun phrases first
         result = parse_with(sentence, self.noun_grammar)
-        result.pretty_print()
         # then parse passive forms of verbs
         result = self.parse_passive_verbs(result)
         # then parse active forms of verbs
@@ -175,10 +170,8 @@ class Extractor:
                     if p.label() == 'NP':
                         if triple.action is None:
                             triple.x = extract_noun(p)
-                            print("extracted", triple.x)
                         else:
                             triple.y = extract_noun(p)
-                            print("extracted", triple.y)
                     elif p.label() in ['ACT', 'PSV']:
                         triple.action = extract_verb(p)
                     else:

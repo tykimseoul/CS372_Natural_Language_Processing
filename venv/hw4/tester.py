@@ -129,7 +129,6 @@ def clean_sentence(sent):
         idx = sent.index(':')
         sent = sent[idx + 1:]
     sent = sent.strip()
-    print(sent)
     return sent
 
 
@@ -143,7 +142,7 @@ def test_with(extractor):
     df = read_test_cases(2020, 2014)
     testcases = collapse_testcases(df)
     testcases = clip_triple_types(testcases)
-    print(testcases.head(len(testcases)))
+    print(testcases.head())
     training_testcases = testcases.sample(frac=0.8)
     testing_testcases = testcases.drop(training_testcases.index)
     calculate_performance(extractor, training_testcases)
