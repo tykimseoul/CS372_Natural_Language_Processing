@@ -8,6 +8,7 @@ import pandas as pd
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 1000)
 pd.set_option('display.max_colwidth', 200)
+pd.set_option('display.max_rows', None)
 
 
 class TestCase:
@@ -21,8 +22,17 @@ class TestCase:
     def __iter__(self):
         return iter([self.id, self.year, self.organization])
 
-    def to_string(self):
+    def __str__(self):
         return 'TESTCASE\n\t{}\n\t{}\n\t{}\n\t{}\n\t{}'.format(self.id, self.year, self.sentence, self.organization, list(map(lambda t: t.to_string(), self.triples)))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'year': self.year,
+            'sentence': self.sentence,
+            'organization': self.organization,
+            'triples': self.triples
+        }
 
 
 class Triple:
@@ -50,7 +60,6 @@ def read_test_cases(start, end):
         df = pd.read_csv('corpus_tagged_{}.csv'.format(year), encoding='unicode_escape')
         df.drop(df.columns[[8, 9, 10, 11, 12, 13]], axis=1, inplace=True)
         df.drop(df[df.type == -1].index, inplace=True)
-        df.drop(df[df.type == 0].index, inplace=True)
         dfs.append(df)
         print(df.head())
     full_df = pd.concat(dfs, axis=0)
@@ -61,8 +70,9 @@ def read_test_cases(start, end):
 
 
 def collapse_testcases(df):
-    testcases = [TestCase(row[0], row[1], row[2], clean_sentence(row[3]), {Triple(row[4], remove_parentheses(row[5]), row[6], remove_parentheses(row[7]))}) for row in
-                 df[['id', 'year', 'org', 'sentence', 'type', 'X', 'action', 'Y']].values]
+    testcases = [TestCase(row[0], row[1], row[2], clean_sentence(row[3]), {Triple(row[4], remove_parentheses(row[5]), row[6], remove_parentheses(row[7]))})
+                 if row[4] != 0 else TestCase(row[0], row[1], row[2], clean_sentence(row[3]), set())
+                 for row in df[['id', 'year', 'org', 'sentence', 'type', 'X', 'action', 'Y']].values]
     collapse_index = 0
     collapsed_testcases = []
     for idx, t in enumerate(testcases):
@@ -75,7 +85,22 @@ def collapse_testcases(df):
             collapsed_testcases.append(t)
     print("testcase size:", len(collapsed_testcases))
     assert df['sentence'].nunique() == len(collapsed_testcases)
+    collapsed_testcases = pd.DataFrame.from_records([t.to_dict() for t in collapsed_testcases])
     return collapsed_testcases
+
+
+def clip_triple_types(df):
+    types = []
+    for i in range(6):
+        if i == 0:
+            type_df = df[df['triples'].apply(lambda t: len(t) == 0)][:20]
+            types.append(type_df)
+            continue
+        type_df = df[df['triples'].apply(lambda t: len(t) > 0 and list(t)[0].type == i)][:20]
+        types.append(type_df)
+    clipped = pd.concat(types)
+    assert len(clipped) == 120
+    return clipped
 
 
 def clean_sentence(sent):
@@ -92,6 +117,7 @@ def clean_sentence(sent):
     print(sent)
     return sent
 
+
 def remove_parentheses(sent):
     return re.sub('\\([^)]*\\)', '', sent)
 
@@ -99,12 +125,24 @@ def remove_parentheses(sent):
 def test_with(extractor):
     df = read_test_cases(2020, 2014)
     testcases = collapse_testcases(df)
-    sentences = list(map(lambda t: t.sentence, testcases))
-    relations = list(map(lambda t: t.triples, testcases))
-    extractions = list(map(lambda t: extractor.extract(t.sentence), testcases))
-    test_size = len(testcases)
-    assert [len(sentences), len(relations), len(extractions)] == [test_size, test_size, test_size]
-    df = pd.DataFrame({'sentence': sentences, 'relations': relations, 'extractions': extractions})
-    incorrect = df[df['relations'] != df['extractions']]
+    testcases = clip_triple_types(testcases)
+    print(testcases.head(len(testcases)))
+    training_testcases = testcases.sample(frac=0.8)
+    testing_testcases = testcases.drop(training_testcases.index)
+    calculate_performance(extractor, training_testcases)
+    calculate_performance(extractor, testing_testcases)
+
+
+def calculate_performance(extractor, testcases):
+    testcases['extractions'] = testcases.apply(lambda t: extractor.extract(t['sentence']), axis=1)
+    incorrect = testcases[testcases['triples'] != testcases['extractions']]
     print(incorrect.head(100))
-    print('===== RESULT =====\n', len(incorrect), len(df))
+    print('===== RESULT =====\n', len(incorrect), len(testcases))
+    true_positive = testcases[(len(testcases['triples']) > 0) & (testcases['triples'] == testcases['extractions'])]
+    false_negative = testcases[(len(testcases['triples']) > 0) & (testcases['triples'] != testcases['extractions'])]
+    false_positive = testcases[(len(testcases['triples']) == 0) & (testcases['triples'] != testcases['extractions'])]
+    # true_negative = testcases[(len(testcases['triples']) == 0) & (testcases['triples'] == testcases['extractions'])]
+    precision = len(true_positive) / (len(true_positive) + len(false_positive))
+    recall = len(true_positive) / (len(true_positive) + len(false_negative))
+    f_score = (2 * precision * recall) / (precision + recall)
+    print('Precision: {}\nRecall: {}\nF-score: {}'.format(precision, recall, f_score))
