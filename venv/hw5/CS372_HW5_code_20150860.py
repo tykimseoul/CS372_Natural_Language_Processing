@@ -40,6 +40,16 @@ def get_word_index(sent, entity, offset=0):
             return [-1]
 
 
+def get_sent_index(text, entity, offset=0):
+    sents = nltk.sent_tokenize(text)
+    lengths = list(map(len, sents))
+    lengths_acc = [0] + list(accumulate(lengths))
+    sent_index = lengths_acc.index(next(filter(lambda l: l > offset, lengths_acc))) - 1
+    offset -= (lengths_acc[sent_index] + sent_index)
+    word_index = get_word_index(sents[sent_index], entity, offset)
+    return sent_index, word_index
+
+
 # remove adjectives and adverbs from the provided sentence
 def simplify_sentence(sent):
     sent = nltk.pos_tag(word_tokenize_with_dash(sent))
@@ -49,15 +59,39 @@ def simplify_sentence(sent):
 
 
 # remove sentences that does not contain the pronoun, A or B
-def reduce_text(text, pronoun, a, b):
+def reduce_text(text, relevant_indices):
+    sents = nltk.sent_tokenize(text)
+    relevant_sents = list(filter(lambda s: s[0] in relevant_indices, enumerate(sents)))
+    relevant_sents = list(map(lambda s: s[1], relevant_sents))
+    return ' '.join(relevant_sents)
+
+
+def relevant_sentences(text, pronoun, a, b):
     indices = [pronoun, a, b]
     sents = nltk.sent_tokenize(text)
     lengths = list(map(len, sents))
     lengths_acc = [0] + list(accumulate(lengths))
     relevant_indices = set(map(lambda i: lengths_acc.index(next(filter(lambda l: l > i, lengths_acc))) - 1, indices))
-    relevant_sents = list(filter(lambda s: s[0] in relevant_indices, enumerate(sents)))
-    relevant_sents = list(map(lambda s: s[1], relevant_sents))
-    return ' '.join(relevant_sents)
+    return relevant_indices
+
+
+def get_simplified_sent_index(text, sent_index, relevant_indices):
+    irrelevant_indices = set(range(len(nltk.sent_tokenize(text)))) - relevant_indices
+    irrelevant_count_before_current = len(set(filter(lambda i: i < sent_index[0], irrelevant_indices)))
+    return sent_index[0] - irrelevant_count_before_current, sent_index[1]
+
+
+def label_entities(text, pronoun, a, b):
+    pronoun = (pronoun[0], tuple(pronoun[1]))
+    a = (a[0], tuple(a[1]))
+    b = (b[0], tuple(b[1]))
+    sents = nltk.sent_tokenize(text)
+    sents = list(map(word_tokenize_with_dash, sents))
+    labels = {pronoun: 'PRN', a: 'A', b: 'B'}
+    for label in labels.keys():
+        for idx in label[1]:
+            sents[label[0]][idx] = (sents[label[0]][idx], labels[label])
+    return sents
 
 
 def read_tsv(filename):
@@ -69,28 +103,25 @@ def find_indices(df):
     df['Pronoun-index'] = df.apply(lambda r: get_word_index(r['Text'], r['Pronoun'], r['Pronoun-offset']), axis=1)
     df['A-index'] = df.apply(lambda r: get_word_index(r['Text'], r['A'], r['A-offset']), axis=1)
     df['B-index'] = df.apply(lambda r: get_word_index(r['Text'], r['B'], r['B-offset']), axis=1)
-    print(df.head(30))
-    invalid = df[df.apply(lambda r: -1 in r['A-index'] or -1 in r['B-index'], axis=1)]
-    print(invalid.head(len(invalid)))
-    print(len(invalid))
+    df['Pronoun-sent-index'] = df.apply(lambda r: get_sent_index(r['Text'], r['Pronoun'], r['Pronoun-offset']), axis=1)
+    df['A-sent-index'] = df.apply(lambda r: get_sent_index(r['Text'], r['A'], r['A-offset']), axis=1)
+    df['B-sent-index'] = df.apply(lambda r: get_sent_index(r['Text'], r['B'], r['B-offset']), axis=1)
     return df
 
 
 def simplify(df):
-    df['Text-simplified'] = df.apply(lambda r: reduce_text(r['Text'], r['Pronoun-offset'], r['A-offset'], r['B-offset']), axis=1)
+    df['Relevant-sentences'] = df.apply(lambda r: relevant_sentences(r['Text'], r['Pronoun-offset'], r['A-offset'], r['B-offset']), axis=1)
+    df['Text-simplified'] = df.apply(lambda r: reduce_text(r['Text'], r['Relevant-sentences']), axis=1)
+    df['Pronoun-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['Pronoun-sent-index'], r['Relevant-sentences']), axis=1)
+    df['A-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['A-sent-index'], r['Relevant-sentences']), axis=1)
+    df['B-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['B-sent-index'], r['Relevant-sentences']), axis=1)
     df['Text-simplified'] = df.apply(lambda r: simplify_sentence(r['Text-simplified']), axis=1)
+    df['Text-labeled'] = df.apply(lambda r: label_entities(r['Text-simplified'], r['Pronoun-sent-index-simplified'], r['A-sent-index-simplified'], r['B-sent-index-simplified']), axis=1)
     df['reduction'] = df.apply(lambda r: '{} -> {}'.format(len(nltk.sent_tokenize(r['Text'])), len(nltk.sent_tokenize(r['Text-simplified']))), axis=1)
-    return df
-
-
-def find_orders(df):
-    df['precedence'] = df.apply(lambda r: r['Pronoun-offset'] < r['A-offset'] and r['Pronoun-offset'] < r['B-offset'], axis=1)
     return df
 
 
 data = read_tsv('./GAP/gap-development.tsv')[:30]
 data = find_indices(data)
 data = simplify(data)
-data = find_orders(data)
 print(data.head(30))
-print(data['precedence'].value_counts())
