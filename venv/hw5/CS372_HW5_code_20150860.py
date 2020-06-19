@@ -1,18 +1,23 @@
 import pandas as pd
 import nltk
 import re
+from itertools import accumulate
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 10000)
 pd.set_option('display.max_colwidth', 3000)
 pd.set_option('display.max_rows', None)
 
+exclusions = ['JJ.?', 'RB.?']
+# join into a single regex
+exclusions = "(" + ")|(".join(exclusions) + ")"
+
 
 def word_tokenize_with_dash(sent):
-    if '-' in sent:
-        sent = re.sub(r"\-", " - ", sent)
-        sent = re.sub(r"\s+", " ", sent)
-        sent = re.sub(r"\- \-", "--", sent)
+    # if '-' in sent:
+    #     sent = re.sub(r"-", " - ", sent)
+    #     sent = re.sub(r"\s+", " ", sent)
+    #     sent = re.sub(r"- -", "--", sent)
     return nltk.word_tokenize(sent)
 
 
@@ -35,8 +40,32 @@ def get_word_index(sent, entity, offset=0):
             return [-1]
 
 
+# remove adjectives and adverbs from the provided sentence
+def simplify_sentence(sent):
+    sent = nltk.pos_tag(word_tokenize_with_dash(sent))
+    sent = ' '.join(list(map(lambda w: w[0] if not re.match(exclusions, w[1]) else '#', sent)))
+    sent = re.sub(r'\s([,.?;\'])', r'\1', sent)
+    return sent
+
+
+# remove sentences that does not contain the pronoun, A or B
+def reduce_text(text, pronoun, a, b):
+    indices = [pronoun, a, b]
+    sents = nltk.sent_tokenize(text)
+    lengths = list(map(len, sents))
+    lengths_acc = [0] + list(accumulate(lengths))
+    relevant_indices = set(map(lambda i: lengths_acc.index(next(filter(lambda l: l > i, lengths_acc))) - 1, indices))
+    relevant_sents = list(filter(lambda s: s[0] in relevant_indices, enumerate(sents)))
+    relevant_sents = list(map(lambda s: s[1], relevant_sents))
+    return ' '.join(relevant_sents)
+
+
 def read_tsv(filename):
     df = pd.read_csv(filename, sep='\t')
+    return df
+
+
+def find_indices(df):
     df['Pronoun-index'] = df.apply(lambda r: get_word_index(r['Text'], r['Pronoun'], r['Pronoun-offset']), axis=1)
     df['A-index'] = df.apply(lambda r: get_word_index(r['Text'], r['A'], r['A-offset']), axis=1)
     df['B-index'] = df.apply(lambda r: get_word_index(r['Text'], r['B'], r['B-offset']), axis=1)
@@ -47,4 +76,21 @@ def read_tsv(filename):
     return df
 
 
-read_tsv('./GAP/gap-development.tsv')
+def simplify(df):
+    df['Text-simplified'] = df.apply(lambda r: reduce_text(r['Text'], r['Pronoun-offset'], r['A-offset'], r['B-offset']), axis=1)
+    df['Text-simplified'] = df.apply(lambda r: simplify_sentence(r['Text-simplified']), axis=1)
+    df['reduction'] = df.apply(lambda r: '{} -> {}'.format(len(nltk.sent_tokenize(r['Text'])), len(nltk.sent_tokenize(r['Text-simplified']))), axis=1)
+    return df
+
+
+def find_orders(df):
+    df['precedence'] = df.apply(lambda r: r['Pronoun-offset'] < r['A-offset'] and r['Pronoun-offset'] < r['B-offset'], axis=1)
+    return df
+
+
+data = read_tsv('./GAP/gap-development.tsv')[:30]
+data = find_indices(data)
+data = simplify(data)
+data = find_orders(data)
+print(data.head(30))
+print(data['precedence'].value_counts())
