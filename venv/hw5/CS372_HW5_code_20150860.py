@@ -20,6 +20,7 @@ def word_tokenize_with_dash(sent):
     #     sent = re.sub(r"-", " - ", sent)
     #     sent = re.sub(r"\s+", " ", sent)
     #     sent = re.sub(r"- -", "--", sent)
+    sent = re.sub(r"\.,", ",", sent)
     return nltk.word_tokenize(sent)
 
 
@@ -129,44 +130,81 @@ def extract_candidates(sent, pronoun):
     # TODO: test this
     sents = sents[:pronoun[0] + 1]
     assert len(sents) > 0
-    sents = list(map(lambda s: nltk.pos_tag(word_tokenize_with_dash(s)), sents))
-    cp = nltk.RegexpParser('NNP: {<NNP>+}')
-    sents = list(map(lambda s: cp.parse(s), sents))
 
-    def process_single_sent(sent):
-        candidates = list(filter(lambda s: type(s) == nltk.tree.Tree and s.label() == 'NNP', sent))
-        candidates = list(map(lambda t: t.flatten(), candidates))
-        candidates = list(map(lambda t: t.leaves(), candidates))
-        candidates = list(map(lambda l: ' '.join([p[0] for p in l]), candidates))
-        candidates = list(filter(lambda e: check_wikipedia(e), candidates))
-        return candidates
+    def single_sent_candidates(sent):
+        print('raw', sent)
+        untagged_sent = word_tokenize_with_dash(sent)
+        print('untagged', untagged_sent)
+        sent = nltk.pos_tag(untagged_sent)
+        cp = nltk.RegexpParser('NNP: {<NNP>+}')
+        sent = cp.parse(sent)
+        candidate = list(filter(lambda s: type(s) == nltk.tree.Tree and s.label() == 'NNP', sent))
+        candidate = list(map(lambda t: t.flatten(), candidate))
+        candidate = list(map(lambda t: t.leaves(), candidate))
+        candidate = list(map(lambda l: ' '.join([p[0] for p in l]), candidate))
+        genders = list(map(lambda e: check_wikipedia(e), candidate))
+        positions = list(map(lambda e: list(nltk.ngrams(untagged_sent, len(word_tokenize_with_dash(e)))).index(tuple(word_tokenize_with_dash(e))), candidate))
+        print(positions)
+        return list(zip(candidate, genders, positions))
 
-    sents = list(map(lambda s: process_single_sent(s), sents))
-    return sents
+    candidates = list(map(lambda s: single_sent_candidates(s), sents))
+    result = []
+    for s in enumerate(candidates):
+        print(s[1])
+        indexed = [(c[0], c[1], s[0], c[2]) for c in s[1]]
+        result.extend(indexed)
+    return result
 
 
 def check_wikipedia(entity):
-    print('entity: ', entity)
     html = requests.get('https://en.wikipedia.org/wiki/{}'.format(entity))
     soup = BeautifulSoup(html.text, "html.parser")
     categories = soup.find(class_='mw-normal-catlinks')
+    gender = 'UNK'
+    person = 'NOT'
     if categories is None:
-        return False
+        return person, gender
     categories = categories.findAll('li')
     categories = list(map(lambda c: c.text, categories))
-    print('cat: ', categories)
     if 'Disambiguation pages' in categories:
         headers = soup.findAll(class_='mw-headline')
         headers = list(map(lambda h: h.text, headers))
-        print('head: ', headers)
         is_name = 'People' in headers
         if is_name:
-            return True
+            person = 'NAME'
+            gender = determine_gender(entity)
     else:
-        is_real_person = any(list(map(lambda c: 'births' in c, categories)))
+        is_real_person = any(list(map(lambda c: 'births' in c or 'people' in c or 'deaths' in c, categories)))
         if not is_real_person:
-            print('is nothing? ' + entity)
-        return is_real_person
+            person = 'NOT'
+        else:
+            person = 'REAL'
+            gender = determine_gender(entity)
+    result = (person, gender)
+    return result
+
+
+def determine_gender(name):
+    name = word_tokenize_with_dash(name)
+    # can determine first name only if more than one term is provided
+    if len(name) > 1:
+        is_male = gender_helper('https://en.wikipedia.org/w/index.php?title=Category:English_masculine_given_names&from={}'.format(name[0][0]), name[0])
+        is_female = gender_helper('https://en.wikipedia.org/w/index.php?title=Category:English_feminine_given_names&from={}'.format(name[0][0]), name[0])
+        if is_male != is_female:
+            if is_male:
+                return 'M'
+            else:
+                return 'F'
+    return 'UNK'
+
+
+def gender_helper(link, name):
+    html = requests.get(link)
+    soup = BeautifulSoup(html.text, "html.parser")
+    names = soup.findAll('li')
+    names = list(map(lambda c: c.text, names))
+    contained = any(list(map(lambda c: name.lower() in word_tokenize_with_dash(c.lower()), names)))
+    return contained
 
 
 def extract(df):
@@ -180,11 +218,10 @@ def extract(df):
 # in context aware cases, use the links already provided in the wikipedia page
 # if multiple terms, first one is the first name, if not, it can be either first name or last name
 # determine gender of name
-data = read_tsv('./GAP/gap-development.tsv')[:1]
+data = read_tsv('./GAP/gap-development.tsv')[:10]
 data = find_indices(data)
 data = simplify(data)
 data = extract(data)
-# print(check_wikipedia('Kenneth Grant'))
 print(data.head(30))
 # pronouns are either male or female
 print(data['Pronoun'].value_counts())
