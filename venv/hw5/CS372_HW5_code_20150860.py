@@ -2,6 +2,8 @@ import pandas as pd
 import nltk
 import re
 from itertools import accumulate
+from bs4 import BeautifulSoup
+import requests
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 10000)
@@ -115,13 +117,74 @@ def simplify(df):
     df['Pronoun-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['Pronoun-sent-index'], r['Relevant-sentences']), axis=1)
     df['A-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['A-sent-index'], r['Relevant-sentences']), axis=1)
     df['B-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['B-sent-index'], r['Relevant-sentences']), axis=1)
-    df['Text-simplified'] = df.apply(lambda r: simplify_sentence(r['Text-simplified']), axis=1)
     df['Text-labeled'] = df.apply(lambda r: label_entities(r['Text-simplified'], r['Pronoun-sent-index-simplified'], r['A-sent-index-simplified'], r['B-sent-index-simplified']), axis=1)
+    df['Text-simplified'] = df.apply(lambda r: simplify_sentence(r['Text-simplified']), axis=1)
     df['reduction'] = df.apply(lambda r: '{} -> {}'.format(len(nltk.sent_tokenize(r['Text'])), len(nltk.sent_tokenize(r['Text-simplified']))), axis=1)
     return df
 
 
-data = read_tsv('./GAP/gap-development.tsv')[:30]
+def extract_candidates(sent, pronoun):
+    sents = nltk.sent_tokenize(sent)
+    # ignore those that appear in a different sentence after one that contains the pronoun
+    # TODO: test this
+    sents = sents[:pronoun[0] + 1]
+    assert len(sents) > 0
+    sents = list(map(lambda s: nltk.pos_tag(word_tokenize_with_dash(s)), sents))
+    cp = nltk.RegexpParser('NNP: {<NNP>+}')
+    sents = list(map(lambda s: cp.parse(s), sents))
+
+    def process_single_sent(sent):
+        candidates = list(filter(lambda s: type(s) == nltk.tree.Tree and s.label() == 'NNP', sent))
+        candidates = list(map(lambda t: t.flatten(), candidates))
+        candidates = list(map(lambda t: t.leaves(), candidates))
+        candidates = list(map(lambda l: ' '.join([p[0] for p in l]), candidates))
+        candidates = list(filter(lambda e: check_wikipedia(e), candidates))
+        return candidates
+
+    sents = list(map(lambda s: process_single_sent(s), sents))
+    return sents
+
+
+def check_wikipedia(entity):
+    print('entity: ', entity)
+    html = requests.get('https://en.wikipedia.org/wiki/{}'.format(entity))
+    soup = BeautifulSoup(html.text, "html.parser")
+    categories = soup.find(class_='mw-normal-catlinks')
+    if categories is None:
+        return False
+    categories = categories.findAll('li')
+    categories = list(map(lambda c: c.text, categories))
+    print('cat: ', categories)
+    if 'Disambiguation pages' in categories:
+        headers = soup.findAll(class_='mw-headline')
+        headers = list(map(lambda h: h.text, headers))
+        print('head: ', headers)
+        is_name = 'People' in headers
+        if is_name:
+            return True
+    else:
+        is_real_person = any(list(map(lambda c: 'births' in c, categories)))
+        if not is_real_person:
+            print('is nothing? ' + entity)
+        return is_real_person
+
+
+def extract(df):
+    df['candidates'] = df.apply(lambda r: extract_candidates(r['Text-simplified'], r['Pronoun-sent-index-simplified']), axis=1)
+    return df
+
+
+# extract names from sentences and find nearest one to the pronoun. But exclude those that appear after and different sentence.
+# Test so that the last condition actually improves accuracy.
+# filter only names from the candidates by searching in wikipedia because named entities usually appear in wikipedia
+# in context aware cases, use the links already provided in the wikipedia page
+# if multiple terms, first one is the first name, if not, it can be either first name or last name
+# determine gender of name
+data = read_tsv('./GAP/gap-development.tsv')[:1]
 data = find_indices(data)
 data = simplify(data)
+data = extract(data)
+# print(check_wikipedia('Kenneth Grant'))
 print(data.head(30))
+# pronouns are either male or female
+print(data['Pronoun'].value_counts())
