@@ -120,6 +120,7 @@ def simplify(df):
     df['B-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['B-sent-index'], r['Relevant-sentences']), axis=1)
     df['Text-labeled'] = df.apply(lambda r: label_entities(r['Text-simplified'], r['Pronoun-sent-index-simplified'], r['A-sent-index-simplified'], r['B-sent-index-simplified']), axis=1)
     df['Text-simplified'] = df.apply(lambda r: simplify_sentence(r['Text-simplified']), axis=1)
+    df['Sent-simplified-lengths'] = df.apply(lambda r: [len(word_tokenize_with_dash(s)) for s in nltk.sent_tokenize(r['Text-simplified'])], axis=1)
     df['reduction'] = df.apply(lambda r: '{} -> {}'.format(len(nltk.sent_tokenize(r['Text'])), len(nltk.sent_tokenize(r['Text-simplified']))), axis=1)
     return df
 
@@ -134,7 +135,6 @@ def extract_candidates(sent, pronoun):
     def single_sent_candidates(sent):
         print('raw', sent)
         untagged_sent = word_tokenize_with_dash(sent)
-        print('untagged', untagged_sent)
         sent = nltk.pos_tag(untagged_sent)
         cp = nltk.RegexpParser('NNP: {<NNP>+}')
         sent = cp.parse(sent)
@@ -144,15 +144,14 @@ def extract_candidates(sent, pronoun):
         candidate = list(map(lambda l: ' '.join([p[0] for p in l]), candidate))
         genders = list(map(lambda e: check_wikipedia(e), candidate))
         positions = list(map(lambda e: list(nltk.ngrams(untagged_sent, len(word_tokenize_with_dash(e)))).index(tuple(word_tokenize_with_dash(e))), candidate))
-        print(positions)
         return list(zip(candidate, genders, positions))
 
     candidates = list(map(lambda s: single_sent_candidates(s), sents))
     result = []
     for s in enumerate(candidates):
-        print(s[1])
         indexed = [(c[0], c[1], s[0], c[2]) for c in s[1]]
         result.extend(indexed)
+    result = list(filter(lambda r: r[1][0] != 'NOT', result))
     return result
 
 
@@ -207,8 +206,66 @@ def gender_helper(link, name):
     return contained
 
 
+def calculate_distance(lengths, pronoun, pronoun_index, candidates):
+    def dist(pronoun_sent_idx, pronoun_word_idx, word_sent_idx, word_idx):
+        if pronoun_sent_idx < word_sent_idx:
+            return lengths[pronoun_sent_idx] - pronoun_word_idx + word_idx
+        elif pronoun_sent_idx > word_sent_idx:
+            return lengths[word_sent_idx] - word_idx + pronoun_word_idx
+        else:
+            return abs(pronoun_word_idx - word_idx)
+
+    distances = list(map(lambda c: dist(pronoun_index[0], pronoun_index[1][0], c[2], c[3]), candidates))
+    if pronoun.lower() == 'he' or pronoun.lower() == 'his':
+        wrong_gender = list(map(lambda c: c[0] if c[1][1][1] == 'F' else -1, enumerate(candidates)))
+    elif pronoun.lower() == 'she' or pronoun.lower() == 'her':
+        wrong_gender = list(map(lambda c: c[0] if c[1][1][1] == 'M' else -1, enumerate(candidates)))
+    else:
+        wrong_gender = []
+    distances = list(map(lambda d: 100000 if d[0] in wrong_gender else d[1], enumerate(distances)))
+    return distances
+
+
 def extract(df):
     df['candidates'] = df.apply(lambda r: extract_candidates(r['Text-simplified'], r['Pronoun-sent-index-simplified']), axis=1)
+    df['distance'] = df.apply(lambda r: calculate_distance(r['Sent-simplified-lengths'], r['Pronoun'], r['Pronoun-sent-index-simplified'], r['candidates']), axis=1)
+    return df
+
+
+def choose_candidate(a, b, candidates, distances):
+    a_guess = False
+    b_guess = False
+    min_idx = distances.index(min(distances))
+    try:
+        a_idx = list(map(lambda c: c[0], candidates)).index(a)
+        a_guess = a_idx == min_idx
+    except ValueError:
+        a_idx = -1
+    try:
+        b_idx = list(map(lambda c: c[0], candidates)).index(b)
+        b_guess = b_idx == min_idx
+    except ValueError:
+        b_idx = -1
+
+    if a_idx == -1 and b_idx == -1:
+        return a_guess, b_guess
+    if a_guess == b_guess:
+        a_dist = distances[a_idx]
+        b_dist = distances[b_idx]
+        if a_dist < b_dist:
+            a_guess = True
+            b_guess = False
+        else:
+            a_guess = False
+            b_guess = True
+    return a_guess, b_guess
+
+
+def guess(df):
+    df['guess'] = df.apply(lambda r: choose_candidate(r['A'], r['B'], r['candidates'], r['distance']), axis=1)
+    df['A-guess'] = df['guess'][0]
+    df['B-guess'] = df['guess'][1]
+    df.drop('guess', axis=1, inplace=True)
     return df
 
 
@@ -222,6 +279,7 @@ data = read_tsv('./GAP/gap-development.tsv')[:10]
 data = find_indices(data)
 data = simplify(data)
 data = extract(data)
+data = guess(data)
 print(data.head(30))
 # pronouns are either male or female
 print(data['Pronoun'].value_counts())
