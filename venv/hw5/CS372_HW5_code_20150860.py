@@ -4,6 +4,8 @@ import re
 from itertools import accumulate
 from bs4 import BeautifulSoup
 import requests
+from collections import defaultdict
+import time
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 10000)
@@ -13,6 +15,9 @@ pd.set_option('display.max_rows', None)
 exclusions = ['JJ.?', 'RB.?']
 # join into a single regex
 exclusions = "(" + ")|(".join(exclusions) + ")"
+
+all_male_names = defaultdict(set)
+all_female_names = defaultdict(set)
 
 
 def word_tokenize_with_dash(sent):
@@ -175,7 +180,11 @@ def check_wikipedia(entity):
     else:
         is_real_person = any(list(map(lambda c: 'births' in c or 'people' in c or 'deaths' in c, categories)))
         if not is_real_person:
-            person = 'NOT'
+            gender = determine_gender(entity)
+            if gender != 'UNK':
+                person = 'NAME'
+            else:
+                person = 'NOT'
         else:
             person = 'REAL'
             gender = determine_gender(entity)
@@ -187,8 +196,8 @@ def determine_gender(name):
     name = word_tokenize_with_dash(name)
     # can determine first name only if more than one term is provided
     if len(name) > 1:
-        is_male = gender_helper('https://en.wikipedia.org/w/index.php?title=Category:English_masculine_given_names&from={}'.format(name[0][0]), name[0])
-        is_female = gender_helper('https://en.wikipedia.org/w/index.php?title=Category:English_feminine_given_names&from={}'.format(name[0][0]), name[0])
+        is_male = gender_helper('https://en.wikipedia.org/w/index.php?title=Category:English_masculine_given_names&from={}'.format(name[0][0]), name[0], 0)
+        is_female = gender_helper('https://en.wikipedia.org/w/index.php?title=Category:English_feminine_given_names&from={}'.format(name[0][0]), name[0], 1)
         if is_male != is_female:
             if is_male:
                 return 'M'
@@ -197,12 +206,20 @@ def determine_gender(name):
     return 'UNK'
 
 
-def gender_helper(link, name):
-    html = requests.get(link)
-    soup = BeautifulSoup(html.text, "html.parser")
-    names = soup.findAll('li')
-    names = list(map(lambda c: c.text, names))
-    contained = any(list(map(lambda c: name.lower() in word_tokenize_with_dash(c.lower()), names)))
+def gender_helper(link, name, gender):
+    all_names = {0: all_male_names, 1: all_female_names}
+    first_letter = name[0].lower()
+    if len(all_names[gender][first_letter]) == 0:
+        html = requests.get(link)
+        soup = BeautifulSoup(html.text, "html.parser")
+        names = soup.findAll('li')
+        names = list(map(lambda c: c.text, names))
+        names = list(filter(lambda n: len(n) > 0, names))
+        names = list(filter(lambda n: n[0].lower() == first_letter, names))
+        contained = any(list(map(lambda c: name.lower() in word_tokenize_with_dash(c.lower()), names)))
+        all_names[gender][first_letter].update(names)
+    else:
+        contained = any(list(map(lambda c: name.lower() in word_tokenize_with_dash(c.lower()), all_names[gender][first_letter])))
     return contained
 
 
@@ -235,6 +252,8 @@ def extract(df):
 def choose_candidate(a, b, candidates, distances):
     a_guess = False
     b_guess = False
+    if len(distances) == 0:
+        return a_guess, b_guess
     min_idx = distances.index(min(distances))
     try:
         a_idx = list(map(lambda c: c[0], candidates)).index(a)
@@ -263,8 +282,7 @@ def choose_candidate(a, b, candidates, distances):
 
 def guess(df):
     df['guess'] = df.apply(lambda r: choose_candidate(r['A'], r['B'], r['candidates'], r['distance']), axis=1)
-    df['A-guess'] = df['guess'][0]
-    df['B-guess'] = df['guess'][1]
+    df['A-guess'], df['B-guess'] = zip(*df.guess)
     df.drop('guess', axis=1, inplace=True)
     return df
 
@@ -275,11 +293,16 @@ def guess(df):
 # in context aware cases, use the links already provided in the wikipedia page
 # if multiple terms, first one is the first name, if not, it can be either first name or last name
 # determine gender of name
-data = read_tsv('./GAP/gap-development.tsv')[:10]
+data = read_tsv('./GAP/gap-test.tsv')[:10]
 data = find_indices(data)
 data = simplify(data)
 data = extract(data)
 data = guess(data)
+# coreference is almost always true and false pair not same
+# check if wikipedia title helps
 print(data.head(30))
 # pronouns are either male or female
 print(data['Pronoun'].value_counts())
+data = data[['ID', 'A-guess', 'B-guess']]
+data.columns = ['ID', 'A-coref', 'B-coref']
+data.to_csv('CS372_HW5_snippet_output_20150860.tsv', sep='\t', header=False, index=False)
