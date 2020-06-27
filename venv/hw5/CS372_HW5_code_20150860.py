@@ -6,6 +6,8 @@ from bs4 import BeautifulSoup
 import requests
 from collections import defaultdict
 import time
+from multiprocessing import Pool, cpu_count, set_start_method
+import numpy as np
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', 10000)
@@ -52,7 +54,7 @@ def get_sent_index(text, entity, offset=0):
     sents = nltk.sent_tokenize(text)
     lengths = list(map(len, sents))
     lengths_acc = [0] + list(accumulate(lengths))
-    sent_index = lengths_acc.index(next(filter(lambda l: l > offset, lengths_acc))) - 1
+    sent_index = lengths_acc.index(next(filter(lambda l: l >= offset, lengths_acc))) - 1
     offset -= (lengths_acc[sent_index] + sent_index)
     word_index = get_word_index(sents[sent_index], entity, offset)
     return sent_index, word_index
@@ -123,14 +125,13 @@ def simplify(df):
     df['Pronoun-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['Pronoun-sent-index'], r['Relevant-sentences']), axis=1)
     df['A-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['A-sent-index'], r['Relevant-sentences']), axis=1)
     df['B-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['B-sent-index'], r['Relevant-sentences']), axis=1)
-    df['Text-labeled'] = df.apply(lambda r: label_entities(r['Text-simplified'], r['Pronoun-sent-index-simplified'], r['A-sent-index-simplified'], r['B-sent-index-simplified']), axis=1)
     df['Text-simplified'] = df.apply(lambda r: simplify_sentence(r['Text-simplified']), axis=1)
     df['Sent-simplified-lengths'] = df.apply(lambda r: [len(word_tokenize_with_dash(s)) for s in nltk.sent_tokenize(r['Text-simplified'])], axis=1)
     df['reduction'] = df.apply(lambda r: '{} -> {}'.format(len(nltk.sent_tokenize(r['Text'])), len(nltk.sent_tokenize(r['Text-simplified']))), axis=1)
     return df
 
 
-def extract_candidates(sent, pronoun):
+def extract_candidates_snippet_context(sent, pronoun):
     sents = nltk.sent_tokenize(sent)
     # ignore those that appear in a different sentence after one that contains the pronoun
     # TODO: test this
@@ -243,9 +244,8 @@ def calculate_distance(lengths, pronoun, pronoun_index, candidates):
     return distances
 
 
-def extract(df):
-    df['candidates'] = df.apply(lambda r: extract_candidates(r['Text-simplified'], r['Pronoun-sent-index-simplified']), axis=1)
-    df['distance'] = df.apply(lambda r: calculate_distance(r['Sent-simplified-lengths'], r['Pronoun'], r['Pronoun-sent-index-simplified'], r['candidates']), axis=1)
+def extract_snippet_context(df):
+    df['candidates'] = df.apply(lambda r: extract_candidates_snippet_context(r['Text-simplified'], r['Pronoun-sent-index-simplified']), axis=1)
     return df
 
 
@@ -281,28 +281,44 @@ def choose_candidate(a, b, candidates, distances):
 
 
 def guess(df):
+    df['distance'] = df.apply(lambda r: calculate_distance(r['Sent-simplified-lengths'], r['Pronoun'], r['Pronoun-sent-index-simplified'], r['candidates']), axis=1)
     df['guess'] = df.apply(lambda r: choose_candidate(r['A'], r['B'], r['candidates'], r['distance']), axis=1)
     df['A-guess'], df['B-guess'] = zip(*df.guess)
     df.drop('guess', axis=1, inplace=True)
     return df
 
 
-# extract names from sentences and find nearest one to the pronoun. But exclude those that appear after and different sentence.
-# Test so that the last condition actually improves accuracy.
-# filter only names from the candidates by searching in wikipedia because named entities usually appear in wikipedia
-# in context aware cases, use the links already provided in the wikipedia page
-# if multiple terms, first one is the first name, if not, it can be either first name or last name
-# determine gender of name
-data = read_tsv('./GAP/gap-test.tsv')[:10]
-data = find_indices(data)
-data = simplify(data)
-data = extract(data)
-data = guess(data)
-# coreference is almost always true and false pair not same
-# check if wikipedia title helps
-print(data.head(30))
-# pronouns are either male or female
-print(data['Pronoun'].value_counts())
-data = data[['ID', 'A-guess', 'B-guess']]
-data.columns = ['ID', 'A-coref', 'B-coref']
-data.to_csv('CS372_HW5_snippet_output_20150860.tsv', sep='\t', header=False, index=False)
+def parallelize(df, func, num_cores):
+    df_split = np.array_split(df, num_cores)
+    df_split = list(filter(lambda d: len(d) > 0, df_split))
+    pool = Pool(num_cores)
+    df = pd.concat(pool.map(func, df_split))
+    pool.close()
+    pool.join()
+    return df
+
+
+if __name__ == '__main__':
+    set_start_method("spawn")
+    # extract names from sentences and find nearest one to the pronoun. But exclude those that appear after and different sentence.
+    # Test so that the last condition actually improves accuracy.
+    # filter only names from the candidates by searching in wikipedia because named entities usually appear in wikipedia
+    # in context aware cases, use the links already provided in the wikipedia page
+    # if multiple terms, first one is the first name, if not, it can be either first name or last name
+    # determine gender of name
+    data = read_tsv('./GAP/gap-test.tsv')[:10]
+    start = time.time()
+    data = parallelize(data, find_indices, cpu_count())
+    data = parallelize(data, simplify, cpu_count())
+    data_snippet = parallelize(data, extract_snippet_context, min(4, cpu_count()))
+    data_snippet = parallelize(data_snippet, guess, cpu_count())
+    end = time.time()
+    print(end - start)
+    # coreference is almost always true and false pair not same
+    # check if wikipedia title helps
+    print(data_snippet.head(30))
+    # pronouns are either male or female
+    print(data_snippet['Pronoun'].value_counts())
+    data_snippet = data_snippet[['ID', 'A-guess', 'B-guess']]
+    data_snippet.columns = ['ID', 'A-coref', 'B-coref']
+    data_snippet.to_csv('CS372_HW5_snippet_output_20150860.tsv', sep='\t', header=False, index=False)
