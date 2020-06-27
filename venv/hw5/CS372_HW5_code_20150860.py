@@ -140,6 +140,7 @@ def extract_candidates_snippet_context(sent, pronoun):
 
     def single_sent_candidates(sent):
         print('raw', sent)
+        raw_sent = sent
         untagged_sent = word_tokenize_with_dash(sent)
         sent = nltk.pos_tag(untagged_sent)
         cp = nltk.RegexpParser('NNP: {<NNP>+}')
@@ -149,7 +150,13 @@ def extract_candidates_snippet_context(sent, pronoun):
         candidate = list(map(lambda t: t.leaves(), candidate))
         candidate = list(map(lambda l: ' '.join([p[0] for p in l]), candidate))
         genders = list(map(lambda e: check_wikipedia(e), candidate))
-        positions = list(map(lambda e: list(nltk.ngrams(untagged_sent, len(word_tokenize_with_dash(e)))).index(tuple(word_tokenize_with_dash(e))), candidate))
+        positions = []
+        for c in candidate:
+            try:
+                p = list(nltk.ngrams(untagged_sent, len(word_tokenize_with_dash(c)))).index(tuple(word_tokenize_with_dash(c)))
+            except ValueError:
+                p = raw_sent.find(c)
+            positions.append(p)
         return list(zip(candidate, genders, positions))
 
     candidates = list(map(lambda s: single_sent_candidates(s), sents))
@@ -189,6 +196,13 @@ def check_wikipedia(entity):
         else:
             person = 'REAL'
             gender = determine_gender(entity)
+            if gender == 'UNK':
+                content = soup.find(class_='mw-parser-output').find('p').text
+                content = list(map(lambda w: w.lower(), word_tokenize_with_dash(content)))
+                if 'he' in content:
+                    gender = 'M'
+                elif 'she' in content:
+                    gender = 'F'
     result = (person, gender)
     return result
 
@@ -306,11 +320,11 @@ if __name__ == '__main__':
     # in context aware cases, use the links already provided in the wikipedia page
     # if multiple terms, first one is the first name, if not, it can be either first name or last name
     # determine gender of name
-    data = read_tsv('./GAP/gap-test.tsv')[:10]
+    data = read_tsv('./GAP/gap-test.tsv')[:500]
     start = time.time()
     data = parallelize(data, find_indices, cpu_count())
     data = parallelize(data, simplify, cpu_count())
-    data_snippet = parallelize(data, extract_snippet_context, min(4, cpu_count()))
+    data_snippet = parallelize(data, extract_snippet_context, min(5, cpu_count()))
     data_snippet = parallelize(data_snippet, guess, cpu_count())
     end = time.time()
     print(end - start)
