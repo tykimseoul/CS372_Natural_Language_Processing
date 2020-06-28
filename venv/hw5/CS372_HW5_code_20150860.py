@@ -160,6 +160,49 @@ def extract_candidates_snippet_context(sent, pronoun):
     return result
 
 
+def alphanumeric(s):
+    s = re.sub(r'\([^)]*\)', '', s)
+    s = re.sub(r'\[[^\]]*\]', '', s)
+    s = re.sub(r'\s+', ' ', s)
+    s = s.strip()
+    return re.sub(r'[^A-Za-z0-9 ]+', '', s)
+
+
+def extract_candidates_page_context(sent, pronoun, url):
+    sents = nltk.sent_tokenize(sent)
+    sents = sents[:pronoun[0] + 1]
+    print(sents)
+    if len(sents) == 0:
+        print("WHY!!!!!!!!", sent)
+        return []
+    html = requests.get(url)
+    soup = BeautifulSoup(html.text, "html.parser")
+    try:
+        content = soup.find(class_='mw-parser-output').findAll('p')
+    except AttributeError:
+        content = soup.find(id='mw-content-text').findAll('p')
+    content_text = list(map(lambda c: c.text, content))
+    try:
+        star_idx = sents[0].index('*')
+    except ValueError:
+        star_idx = 1000000
+    content_sents = [[alphanumeric(c) for c in nltk.sent_tokenize(t)] for t in content_text]
+    content_idx = [any([alphanumeric(sents[0][:min(star_idx, 20)]) in t for t in c]) for c in content_sents]
+    if not any(content_idx):
+        return []
+    idx = content_idx.index(True)
+    content = content[:idx + 1]
+    links = list(map(lambda c: c.findAll('a'), content))
+    links = list(map(lambda l: [k.text for k in l], links))
+    links = [item for sublist in links for item in sublist]
+    links = list(filter(lambda l: not re.match(r'\[.+\]', l), links))
+    links.append(soup.find(class_='firstHeading').text)
+    links = links[-10:]
+    links = list(map(lambda l: (l, check_wikipedia(l)), links))
+    print(len(links), links)
+    return links
+
+
 def check_wikipedia(entity):
     html = requests.get('https://en.wikipedia.org/wiki/{}'.format(entity))
     soup = BeautifulSoup(html.text, "html.parser")
@@ -255,7 +298,12 @@ def extract_snippet_context(df):
     return df
 
 
-def choose_candidate(a, b, candidates, distances):
+def extract_page_context(df):
+    df['candidates'] = df.apply(lambda r: extract_candidates_page_context(r['Text-simplified'], r['Pronoun-sent-index-simplified'], r['URL']), axis=1)
+    return df
+
+
+def choose_candidate_snippet_context(a, b, candidates, distances):
     a_guess = False
     b_guess = False
     if len(distances) == 0:
@@ -286,9 +334,45 @@ def choose_candidate(a, b, candidates, distances):
     return a_guess, b_guess
 
 
-def guess(df):
+def choose_candidate_page_context(pronoun, a, b, candidates):
+    a_guess = False
+    b_guess = False
+    a = a.lower()
+    b = b.lower()
+    candidates = list(filter(lambda c: c[1][0] != 'NOT', candidates))
+    if pronoun.lower() == 'he' or pronoun.lower() == 'his':
+        candidates = list(filter(lambda c: c[1][0] == 'M' or c[1][0] == 'UNK', candidates))
+    elif pronoun.lower() == 'she' or pronoun.lower() == 'her':
+        candidates = list(filter(lambda c: c[1][0] == 'F' or c[1][0] == 'UNK', candidates))
+    candidates = list(map(lambda c: c[0].lower(), candidates))
+    a_idx = list(map(lambda c: tuple(word_tokenize_with_dash(a)) in list(nltk.ngrams(word_tokenize_with_dash(c), len(word_tokenize_with_dash(a)))), candidates))
+    b_idx = list(map(lambda c: tuple(word_tokenize_with_dash(b)) in list(nltk.ngrams(word_tokenize_with_dash(c), len(word_tokenize_with_dash(b)))), candidates))
+    if True in a_idx:
+        a_idx = len(a_idx) - a_idx[::-1].index(True) - 1
+    else:
+        a_idx = -1
+    if True in b_idx:
+        b_idx = len(b_idx) - b_idx[::-1].index(True) - 1
+    else:
+        b_idx = -1
+    if a_idx == -1 and b_idx == -1:
+        return a_guess, b_guess
+    else:
+        a_guess = a_idx > b_idx
+        b_guess = a_idx < b_idx
+        return a_guess, b_guess
+
+
+def guess_snippet_context(df):
     df['distance'] = df.apply(lambda r: calculate_distance(r['Sent-simplified-lengths'], r['Pronoun'], r['Pronoun-sent-index-simplified'], r['candidates']), axis=1)
-    df['guess'] = df.apply(lambda r: choose_candidate(r['A'], r['B'], r['candidates'], r['distance']), axis=1)
+    df['guess'] = df.apply(lambda r: choose_candidate_snippet_context(r['A'], r['B'], r['candidates'], r['distance']), axis=1)
+    df['A-guess'], df['B-guess'] = zip(*df.guess)
+    df.drop('guess', axis=1, inplace=True)
+    return df
+
+
+def guess_page_context(df):
+    df['guess'] = df.apply(lambda r: choose_candidate_page_context(r['Pronoun'], r['A'], r['B'], r['candidates']), axis=1)
     df['A-guess'], df['B-guess'] = zip(*df.guess)
     df.drop('guess', axis=1, inplace=True)
     return df
@@ -304,6 +388,18 @@ def parallelize(df, func, num_cores):
     return df
 
 
+def do_snippet_context(data):
+    data_snippet = parallelize(data, extract_snippet_context, min(5, cpu_count()))
+    data_snippet = parallelize(data_snippet, guess_snippet_context, cpu_count())
+    return data_snippet
+
+
+def do_page_context(data):
+    data_page = parallelize(data, extract_page_context, min(20, cpu_count()))
+    data_page = parallelize(data_page, guess_page_context, cpu_count())
+    return data_page
+
+
 if __name__ == '__main__':
     set_start_method("spawn")
     # extract names from sentences and find nearest one to the pronoun. But exclude those that appear after and different sentence.
@@ -316,15 +412,14 @@ if __name__ == '__main__':
     start = time.time()
     data = parallelize(data, find_indices, cpu_count())
     data = parallelize(data, simplify, cpu_count())
-    data_snippet = parallelize(data, extract_snippet_context, min(5, cpu_count()))
-    data_snippet = parallelize(data_snippet, guess, cpu_count())
+    data = do_page_context(data)
     end = time.time()
     print(end - start)
     # coreference is almost always true and false pair not same
     # check if wikipedia title helps
-    print(data_snippet.head(30))
+    print(data.head(30))
     # pronouns are either male or female
-    print(data_snippet['Pronoun'].value_counts())
-    data_snippet = data_snippet[['ID', 'A-guess', 'B-guess']]
-    data_snippet.columns = ['ID', 'A-coref', 'B-coref']
-    data_snippet.to_csv('CS372_HW5_snippet_output_20150860.tsv', sep='\t', header=False, index=False)
+    print(data['Pronoun'].value_counts())
+    data = data[['ID', 'A-guess', 'B-guess']]
+    data.columns = ['ID', 'A-coref', 'B-coref']
+    data.to_csv('CS372_HW5_page_output_20150860.tsv', sep='\t', header=False, index=False)
