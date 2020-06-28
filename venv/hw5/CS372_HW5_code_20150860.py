@@ -175,7 +175,7 @@ def extract_candidates_page_context(sent, pronoun, url):
     if len(sents) == 0:
         print("WHY!!!!!!!!", sent)
         return []
-    html = requests.get(url)
+    html = safe_request(url)
     soup = BeautifulSoup(html.text, "html.parser")
     try:
         content = soup.find(class_='mw-parser-output').findAll('p')
@@ -199,12 +199,23 @@ def extract_candidates_page_context(sent, pronoun, url):
     links.append(soup.find(class_='firstHeading').text)
     links = links[-10:]
     links = list(map(lambda l: (l, check_wikipedia(l)), links))
+    links = list(filter(lambda c: c[1][0] != 'NOT', links))
     print(len(links), links)
     return links
 
 
+def safe_request(link):
+    try:
+        html = requests.get(link)
+    except requests.exceptions.ConnectionError as e:
+        print('pausing..', e)
+        time.sleep(5)
+        html = requests.get(link)
+    return html
+
+
 def check_wikipedia(entity):
-    html = requests.get('https://en.wikipedia.org/wiki/{}'.format(entity))
+    html = safe_request('https://en.wikipedia.org/wiki/{}'.format(entity))
     soup = BeautifulSoup(html.text, "html.parser")
     categories = soup.find(class_='mw-normal-catlinks')
     gender = 'UNK'
@@ -234,9 +245,9 @@ def check_wikipedia(entity):
             if gender == 'UNK':
                 content = soup.find(class_='mw-parser-output').find('p').text
                 content = list(map(lambda w: w.lower(), word_tokenize_with_dash(content)))
-                if 'he' in content:
+                if 'he' in content or 'him' in content or 'his' in content:
                     gender = 'M'
-                elif 'she' in content:
+                elif 'she' in content or 'her' in content:
                     gender = 'F'
     result = (person, gender)
     return result
@@ -260,7 +271,7 @@ def gender_helper(link, name, gender):
     all_names = {0: all_male_names, 1: all_female_names}
     first_letter = name[0].lower()
     if len(all_names[gender][first_letter]) == 0:
-        html = requests.get(link)
+        html = safe_request(link)
         soup = BeautifulSoup(html.text, "html.parser")
         names = soup.findAll('li')
         names = list(map(lambda c: c.text, names))
@@ -283,7 +294,7 @@ def calculate_distance(lengths, pronoun, pronoun_index, candidates):
             return abs(pronoun_word_idx - word_idx)
 
     distances = list(map(lambda c: dist(pronoun_index[0], pronoun_index[1][0], c[2], c[3]), candidates))
-    if pronoun.lower() == 'he' or pronoun.lower() == 'his':
+    if pronoun.lower() == 'he' or pronoun.lower() == 'his' or pronoun.lower() == 'him':
         wrong_gender = list(map(lambda c: c[0] if c[1][1][1] == 'F' else -1, enumerate(candidates)))
     elif pronoun.lower() == 'she' or pronoun.lower() == 'her':
         wrong_gender = list(map(lambda c: c[0] if c[1][1][1] == 'M' else -1, enumerate(candidates)))
@@ -339,11 +350,10 @@ def choose_candidate_page_context(pronoun, a, b, candidates):
     b_guess = False
     a = a.lower()
     b = b.lower()
-    candidates = list(filter(lambda c: c[1][0] != 'NOT', candidates))
-    if pronoun.lower() == 'he' or pronoun.lower() == 'his':
-        candidates = list(filter(lambda c: c[1][0] == 'M' or c[1][0] == 'UNK', candidates))
+    if pronoun.lower() == 'he' or pronoun.lower() == 'his' or pronoun.lower() == 'him':
+        candidates = list(filter(lambda c: c[1][1] == 'M' or c[1][1] == 'UNK', candidates))
     elif pronoun.lower() == 'she' or pronoun.lower() == 'her':
-        candidates = list(filter(lambda c: c[1][0] == 'F' or c[1][0] == 'UNK', candidates))
+        candidates = list(filter(lambda c: c[1][1] == 'F' or c[1][1] == 'UNK', candidates))
     candidates = list(map(lambda c: c[0].lower(), candidates))
     a_idx = list(map(lambda c: tuple(word_tokenize_with_dash(a)) in list(nltk.ngrams(word_tokenize_with_dash(c), len(word_tokenize_with_dash(a)))), candidates))
     b_idx = list(map(lambda c: tuple(word_tokenize_with_dash(b)) in list(nltk.ngrams(word_tokenize_with_dash(c), len(word_tokenize_with_dash(b)))), candidates))
@@ -389,7 +399,7 @@ def parallelize(df, func, num_cores):
 
 
 def do_snippet_context(data):
-    data_snippet = parallelize(data, extract_snippet_context, min(5, cpu_count()))
+    data_snippet = parallelize(data, extract_snippet_context, min(10, cpu_count()))
     data_snippet = parallelize(data_snippet, guess_snippet_context, cpu_count())
     return data_snippet
 
