@@ -14,23 +14,18 @@ pd.set_option('display.width', 10000)
 pd.set_option('display.max_colwidth', 3000)
 pd.set_option('display.max_rows', None)
 
-exclusions = ['JJ.?', 'RB.?']
-# join into a single regex
-exclusions = "(" + ")|(".join(exclusions) + ")"
-
+# cache for male and female names
 all_male_names = defaultdict(set)
 all_female_names = defaultdict(set)
 
 
+# custom word tokenizing function
 def word_tokenize_with_dash(sent):
-    # if '-' in sent:
-    #     sent = re.sub(r"-", " - ", sent)
-    #     sent = re.sub(r"\s+", " ", sent)
-    #     sent = re.sub(r"- -", "--", sent)
     sent = re.sub(r"\.,", ",", sent)
     return nltk.word_tokenize(sent)
 
 
+# find the word index of an entity within the sentence given the offset
 def get_word_index(sent, entity, offset=0):
     entity_tokens = word_tokenize_with_dash(entity)
     word_offset = len(word_tokenize_with_dash(sent[:offset]))
@@ -50,6 +45,7 @@ def get_word_index(sent, entity, offset=0):
             return [-1]
 
 
+# find the index of the sentence the entity belongs to
 def get_sent_index(text, entity, offset=0):
     sents = nltk.sent_tokenize(text)
     lengths = list(map(len, sents))
@@ -68,6 +64,7 @@ def reduce_text(text, relevant_indices):
     return ' '.join(relevant_sents)
 
 
+# find indices of sentences that contain the pronoun, A or B
 def relevant_sentences(text, pronoun, a, b):
     indices = [pronoun, a, b]
     sents = nltk.sent_tokenize(text)
@@ -77,30 +74,20 @@ def relevant_sentences(text, pronoun, a, b):
     return relevant_indices
 
 
+# find the index of the simplified sentence the entity belongs to
 def get_simplified_sent_index(text, sent_index, relevant_indices):
     irrelevant_indices = set(range(len(nltk.sent_tokenize(text)))) - relevant_indices
     irrelevant_count_before_current = len(set(filter(lambda i: i < sent_index[0], irrelevant_indices)))
     return sent_index[0] - irrelevant_count_before_current, sent_index[1]
 
 
-def label_entities(text, pronoun, a, b):
-    pronoun = (pronoun[0], tuple(pronoun[1]))
-    a = (a[0], tuple(a[1]))
-    b = (b[0], tuple(b[1]))
-    sents = nltk.sent_tokenize(text)
-    sents = list(map(word_tokenize_with_dash, sents))
-    labels = {pronoun: 'PRN', a: 'A', b: 'B'}
-    for label in labels.keys():
-        for idx in label[1]:
-            sents[label[0]][idx] = (sents[label[0]][idx], labels[label])
-    return sents
-
-
+# read tsv file into a dataframe
 def read_tsv(filename):
     df = pd.read_csv(filename, sep='\t')
     return df
 
 
+# calculate word and sentence indices of the pronoun, A and B
 def find_indices(df):
     df['Pronoun-index'] = df.apply(lambda r: get_word_index(r['Text'], r['Pronoun'], r['Pronoun-offset']), axis=1)
     df['A-index'] = df.apply(lambda r: get_word_index(r['Text'], r['A'], r['A-offset']), axis=1)
@@ -110,7 +97,7 @@ def find_indices(df):
     df['B-sent-index'] = df.apply(lambda r: get_sent_index(r['Text'], r['B'], r['B-offset']), axis=1)
     return df
 
-
+# simplify text to contain only relevant sentences and recalculate sentence indices
 def simplify(df):
     df['Relevant-sentences'] = df.apply(lambda r: relevant_sentences(r['Text'], r['Pronoun-offset'], r['A-offset'], r['B-offset']), axis=1)
     df['Text-simplified'] = df.apply(lambda r: reduce_text(r['Text'], r['Relevant-sentences']), axis=1)
@@ -121,10 +108,10 @@ def simplify(df):
     return df
 
 
+# extract candidates for the entity in the snippet context
 def extract_candidates_snippet_context(sent, pronoun):
     sents = nltk.sent_tokenize(sent)
     # ignore those that appear in a different sentence after one that contains the pronoun
-    # TODO: test this
     sents = sents[:pronoun[0] + 1]
     print(sents)
     if len(sents) == 0:
@@ -137,10 +124,12 @@ def extract_candidates_snippet_context(sent, pronoun):
         sent = nltk.pos_tag(untagged_sent)
         cp = nltk.RegexpParser('NNP: {<NNP>+}')
         sent = cp.parse(sent)
+        # collect only NNP phrases
         candidate = list(filter(lambda s: type(s) == nltk.tree.Tree and s.label() == 'NNP', sent))
         candidate = list(map(lambda t: t.flatten(), candidate))
         candidate = list(map(lambda t: t.leaves(), candidate))
         candidate = list(map(lambda l: ' '.join([p[0] for p in l]), candidate))
+        # check Wikipedia for type and gender of the entity
         genders = list(map(lambda e: check_wikipedia(e), candidate))
         positions = []
         for c in candidate:
@@ -156,10 +145,12 @@ def extract_candidates_snippet_context(sent, pronoun):
     for s in enumerate(candidates):
         indexed = [(c[0], c[1], s[0], c[2]) for c in s[1]]
         result.extend(indexed)
+    # remove entities that are not people
     result = list(filter(lambda r: r[1][0] != 'NOT', result))
     return result
 
 
+# keep only alphanumeric characters from a string
 def alphanumeric(s):
     s = re.sub(r'\([^)]*\)', '', s)
     s = re.sub(r'\[[^\]]*\]', '', s)
@@ -168,6 +159,7 @@ def alphanumeric(s):
     return re.sub(r'[^A-Za-z0-9 ]+', '', s)
 
 
+# extract candidates for the entity in the page context
 def extract_candidates_page_context(sent, pronoun, url):
     sents = nltk.sent_tokenize(sent)
     sents = sents[:pronoun[0] + 1]
@@ -190,20 +182,27 @@ def extract_candidates_page_context(sent, pronoun, url):
     content_idx = [any([alphanumeric(sents[0][:min(star_idx, 20)]) in t for t in c]) for c in content_sents]
     if not any(content_idx):
         return []
+    # find where the given sentence is located within the page
     idx = content_idx.index(True)
+    # ignore those that appear in a different sentence after one that contains the pronoun
     content = content[:idx + 1]
+    # get items that are Wikipedia entries
     links = list(map(lambda c: c.findAll('a'), content))
     links = list(map(lambda l: [k.text for k in l], links))
     links = [item for sublist in links for item in sublist]
     links = list(filter(lambda l: not re.match(r'\[.+\]', l), links))
     links.append(soup.find(class_='firstHeading').text)
+    # take only closest 10 terms
     links = links[-10:]
+    # check Wikipedia for type and gender of the entity
     links = list(map(lambda l: (l, check_wikipedia(l)), links))
+    # remove entities that are not people
     links = list(filter(lambda c: c[1][0] != 'NOT', links))
     print(len(links), links)
     return links
 
 
+# a safe function against connection error
 def safe_request(link):
     try:
         html = requests.get(link)
@@ -214,6 +213,7 @@ def safe_request(link):
     return html
 
 
+# check Wikipedia for the type and gender of the provided entity
 def check_wikipedia(entity):
     html = safe_request('https://en.wikipedia.org/wiki/{}'.format(entity))
     soup = BeautifulSoup(html.text, "html.parser")
@@ -242,6 +242,7 @@ def check_wikipedia(entity):
         else:
             person = 'REAL'
             gender = determine_gender(entity)
+            # fallback function
             if gender == 'UNK':
                 content = soup.find(class_='mw-parser-output').find('p').text
                 content = list(map(lambda w: w.lower(), word_tokenize_with_dash(content)))
@@ -253,9 +254,10 @@ def check_wikipedia(entity):
     return result
 
 
+# determine gender of a name from a list of male and female names
 def determine_gender(name):
     name = word_tokenize_with_dash(name)
-    # can determine first name only if more than one term is provided
+    # can determine the first name only if more than one term is provided
     if len(name) > 1:
         is_male = gender_helper('https://en.wikipedia.org/w/index.php?title=Category:English_masculine_given_names&from={}'.format(name[0][0]), name[0], 0)
         is_female = gender_helper('https://en.wikipedia.org/w/index.php?title=Category:English_feminine_given_names&from={}'.format(name[0][0]), name[0], 1)
@@ -267,6 +269,7 @@ def determine_gender(name):
     return 'UNK'
 
 
+# helper function for determining gender
 def gender_helper(link, name, gender):
     all_names = {0: all_male_names, 1: all_female_names}
     first_letter = name[0].lower()
@@ -284,6 +287,7 @@ def gender_helper(link, name, gender):
     return contained
 
 
+# calculate the distance between candidates and the pronoun
 def calculate_distance(lengths, pronoun, pronoun_index, candidates):
     def dist(pronoun_sent_idx, pronoun_word_idx, word_sent_idx, word_idx):
         if pronoun_sent_idx < word_sent_idx:
@@ -300,20 +304,24 @@ def calculate_distance(lengths, pronoun, pronoun_index, candidates):
         wrong_gender = list(map(lambda c: c[0] if c[1][1][1] == 'M' else -1, enumerate(candidates)))
     else:
         wrong_gender = []
+    # assign high distance to the wrong gender
     distances = list(map(lambda d: 100000 if d[0] in wrong_gender else d[1], enumerate(distances)))
     return distances
 
 
+# extract candidates in snippet context
 def extract_snippet_context(df):
     df['candidates'] = df.apply(lambda r: extract_candidates_snippet_context(r['Text-simplified'], r['Pronoun-sent-index-simplified']), axis=1)
     return df
 
 
+# extract candidates in page context
 def extract_page_context(df):
     df['candidates'] = df.apply(lambda r: extract_candidates_page_context(r['Text-simplified'], r['Pronoun-sent-index-simplified'], r['URL']), axis=1)
     return df
 
 
+# choose the best candidate in the snippet context
 def choose_candidate_snippet_context(a, b, candidates, distances):
     a_guess = False
     b_guess = False
@@ -331,8 +339,10 @@ def choose_candidate_snippet_context(a, b, candidates, distances):
     except ValueError:
         b_idx = -1
 
+    # if both A and B are not present in candidates
     if a_idx == -1 and b_idx == -1:
         return a_guess, b_guess
+    # if both A and B are not the closest candidate
     if a_guess == b_guess:
         a_dist = distances[a_idx]
         b_dist = distances[b_idx]
@@ -345,11 +355,13 @@ def choose_candidate_snippet_context(a, b, candidates, distances):
     return a_guess, b_guess
 
 
+# choose the best candidate in the page context
 def choose_candidate_page_context(pronoun, a, b, candidates):
     a_guess = False
     b_guess = False
     a = a.lower()
     b = b.lower()
+    # filter only candidates with correct gender
     if pronoun.lower() == 'he' or pronoun.lower() == 'his' or pronoun.lower() == 'him':
         candidates = list(filter(lambda c: c[1][1] == 'M' or c[1][1] == 'UNK', candidates))
     elif pronoun.lower() == 'she' or pronoun.lower() == 'her':
@@ -365,6 +377,7 @@ def choose_candidate_page_context(pronoun, a, b, candidates):
         b_idx = len(b_idx) - b_idx[::-1].index(True) - 1
     else:
         b_idx = -1
+    # if both A and B are not candidates
     if a_idx == -1 and b_idx == -1:
         return a_guess, b_guess
     else:
@@ -373,6 +386,7 @@ def choose_candidate_page_context(pronoun, a, b, candidates):
         return a_guess, b_guess
 
 
+# determine the coreference in snippet context case
 def guess_snippet_context(df):
     df['distance'] = df.apply(lambda r: calculate_distance(r['Sent-simplified-lengths'], r['Pronoun'], r['Pronoun-sent-index-simplified'], r['candidates']), axis=1)
     df['guess'] = df.apply(lambda r: choose_candidate_snippet_context(r['A'], r['B'], r['candidates'], r['distance']), axis=1)
@@ -381,6 +395,7 @@ def guess_snippet_context(df):
     return df
 
 
+# determine the coreference in page context case
 def guess_page_context(df):
     df['guess'] = df.apply(lambda r: choose_candidate_page_context(r['Pronoun'], r['A'], r['B'], r['candidates']), axis=1)
     df['A-guess'], df['B-guess'] = zip(*df.guess)
@@ -388,6 +403,7 @@ def guess_page_context(df):
     return df
 
 
+# use multiprocessing, otherwise it takes too long
 def parallelize(df, func, num_cores):
     df_split = np.array_split(df, num_cores)
     df_split = list(filter(lambda d: len(d) > 0, df_split))
@@ -398,12 +414,14 @@ def parallelize(df, func, num_cores):
     return df
 
 
+# run snippet context case
 def do_snippet_context(data):
     data_snippet = parallelize(data, extract_snippet_context, min(10, cpu_count()))
     data_snippet = parallelize(data_snippet, guess_snippet_context, cpu_count())
     return data_snippet
 
 
+# run page context case
 def do_page_context(data):
     data_page = parallelize(data, extract_page_context, min(20, cpu_count()))
     data_page = parallelize(data_page, guess_page_context, cpu_count())
@@ -412,12 +430,6 @@ def do_page_context(data):
 
 if __name__ == '__main__':
     set_start_method("spawn")
-    # extract names from sentences and find nearest one to the pronoun. But exclude those that appear after and different sentence.
-    # Test so that the last condition actually improves accuracy.
-    # filter only names from the candidates by searching in wikipedia because named entities usually appear in wikipedia
-    # in context aware cases, use the links already provided in the wikipedia page
-    # if multiple terms, first one is the first name, if not, it can be either first name or last name
-    # determine gender of name
     data = read_tsv('./GAP/gap-test.tsv')[:500]
     start = time.time()
     data = parallelize(data, find_indices, cpu_count())
@@ -425,11 +437,8 @@ if __name__ == '__main__':
     data = do_page_context(data)
     end = time.time()
     print(end - start)
-    # coreference is almost always true and false pair not same
-    # check if wikipedia title helps
+    # coreference is almost always a true and false pair not same
     print(data.head(30))
-    # pronouns are either male or female
-    print(data['Pronoun'].value_counts())
     data = data[['ID', 'A-guess', 'B-guess']]
     data.columns = ['ID', 'A-coref', 'B-coref']
     data.to_csv('CS372_HW5_page_output_20150860.tsv', sep='\t', header=False, index=False)
