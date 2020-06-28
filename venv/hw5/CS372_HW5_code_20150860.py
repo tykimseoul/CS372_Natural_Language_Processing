@@ -60,14 +60,6 @@ def get_sent_index(text, entity, offset=0):
     return sent_index, word_index
 
 
-# remove adjectives and adverbs from the provided sentence
-def simplify_sentence(sent):
-    sent = nltk.pos_tag(word_tokenize_with_dash(sent))
-    sent = ' '.join(list(map(lambda w: w[0] if not re.match(exclusions, w[1]) else '#', sent)))
-    sent = re.sub(r'\s([,.?;\'])', r'\1', sent)
-    return sent
-
-
 # remove sentences that does not contain the pronoun, A or B
 def reduce_text(text, relevant_indices):
     sents = nltk.sent_tokenize(text)
@@ -125,9 +117,7 @@ def simplify(df):
     df['Pronoun-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['Pronoun-sent-index'], r['Relevant-sentences']), axis=1)
     df['A-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['A-sent-index'], r['Relevant-sentences']), axis=1)
     df['B-sent-index-simplified'] = df.apply(lambda r: get_simplified_sent_index(r['Text'], r['B-sent-index'], r['Relevant-sentences']), axis=1)
-    df['Text-simplified'] = df.apply(lambda r: simplify_sentence(r['Text-simplified']), axis=1)
     df['Sent-simplified-lengths'] = df.apply(lambda r: [len(word_tokenize_with_dash(s)) for s in nltk.sent_tokenize(r['Text-simplified'])], axis=1)
-    df['reduction'] = df.apply(lambda r: '{} -> {}'.format(len(nltk.sent_tokenize(r['Text'])), len(nltk.sent_tokenize(r['Text-simplified']))), axis=1)
     return df
 
 
@@ -136,10 +126,12 @@ def extract_candidates_snippet_context(sent, pronoun):
     # ignore those that appear in a different sentence after one that contains the pronoun
     # TODO: test this
     sents = sents[:pronoun[0] + 1]
-    assert len(sents) > 0
+    print(sents)
+    if len(sents) == 0:
+        print("WHY!!!!!!!!", sent)
+        return []
 
     def single_sent_candidates(sent):
-        print('raw', sent)
         raw_sent = sent
         untagged_sent = word_tokenize_with_dash(sent)
         sent = nltk.pos_tag(untagged_sent)
