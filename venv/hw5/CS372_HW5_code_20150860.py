@@ -430,7 +430,7 @@ def do_page_context(data):
 
 if __name__ == '__main__':
     set_start_method("spawn")
-    data = read_tsv('./GAP/gap-test.tsv')[:500]
+    data = read_tsv('./GAP/gap-test.tsv')
     start = time.time()
     data = parallelize(data, find_indices, cpu_count())
     data = parallelize(data, simplify, cpu_count())
